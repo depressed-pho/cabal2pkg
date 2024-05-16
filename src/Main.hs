@@ -1,4 +1,8 @@
+{-# LANGUAGE UnicodeSyntax #-}
 module Main where
 
-main :: IO ()
-main = putStrLn "Hello, Haskell!"
+import Cabal2Pkg.CmdLine (getOptions)
+
+
+main ∷ IO ()
+main = print =<< getOptions
