@@ -23,12 +23,19 @@ executable cabal2pkg
 
     other-modules:
         Cabal2Pkg.CmdLine
+        Cabal2Pkg.Command.Init
+        Cabal2Pkg.Utils
 
     build-depends:
         base                 == 4.*
       , base-unicode-symbols ^>= 0.2.4
+      , bytestring           ^>= 0.12.1
+      , conduit              ^>= 1.3.5
+      , exceptions           ^>= 0.10.7
       , filepath             ^>= 1.4 && < 1.6
       , optparse-applicative ^>= 0.18.1
+      , resourcet            ^>= 1.3.0
+      , tar-conduit          ^>= 0.4.1
 
     hs-source-dirs:   src
     default-language: GHC2021

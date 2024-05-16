@@ -4,9 +4,9 @@ module Cabal2Pkg.CmdLine
   ( Options(..)
   , Command(..)
   , getOptions
-  )
-  where
+  ) where
 
+import Cabal2Pkg.Utils qualified as Utils
 import Data.Bifunctor (first)
 import Options.Applicative
   ( (<**>), Parser, ReadM, argument, command
@@ -15,9 +15,6 @@ import Options.Applicative
   )
 import Prelude.Unicode ((∘))
 import System.IO (utf8, utf16le)
-#if !MIN_VERSION_filepath(1, 5, 2)
-import System.IO.Unsafe (unsafePerformIO)
-#endif
 import System.OsPath qualified as OP
 import System.OsPath (OsPath)
 
@@ -30,17 +27,17 @@ data Options
   deriving (Show)
 
 optionsP ∷ Parser Options
-optionsP
-  = Options
-    <$> commandP
-    <*> option path
-        ( long "directory" <>
-          short 'd' <>
-          help "The path to the pkgsrc package to work with" <>
-          showDefault <>
-          value (unsafeEncodeUtf ".") <>
-          metavar "DIR"
-        )
+optionsP =
+  Options
+  <$> commandP
+  <*> option path
+      ( long "directory" <>
+        short 'd' <>
+        help "The path to the pkgsrc package to work with" <>
+        showDefault <>
+        value (Utils.unsafeEncodeUtf ".") <>
+        metavar "DIR"
+      )
 
 path ∷ ReadM OsPath
 path = eitherReader f
@@ -48,13 +45,6 @@ path = eitherReader f
     f ∷ String → Either String OsPath
     f = first show ∘ OP.encodeWith utf8 utf16le
 
--- A shim to unsafeEncodeUtf introduced in filepath-1.5.2
-unsafeEncodeUtf ∷ String → OsPath
-#if MIN_VERSION_filepath(1, 5, 2)
-unsafeEncodeUtf = OP.unsafeEncodeUtf
-#else
-unsafeEncodeUtf = unsafePerformIO ∘ OP.encodeUtf
-#endif
 
 data Command
   = Init { initTarballURL ∷ String }
@@ -62,11 +52,11 @@ data Command
   deriving (Show)
 
 commandP ∷ Parser Command
-commandP
-  = subparser
-    ( command "init" (info initP (progDesc "Create a new pkgsrc package")) <>
-      command "update" (info updateP (progDesc "Update an existing pkgsrc package to the latest version"))
-    )
+commandP =
+  subparser
+  ( command "init" (info initP (progDesc "Create a new pkgsrc package")) <>
+    command "update" (info updateP (progDesc "Update an existing pkgsrc package to the latest version"))
+  )
   where
     initP   = Init <$> argument str (metavar "TARBALL-URL")
     updateP = pure Update
