@@ -25,8 +25,10 @@ executable cabal2pkg
         Cabal2Pkg.CmdLine
 
     build-depends:
-        base == 4.*,
-        optparse-applicative ^>= 0.18.1
+        base                 == 4.*
+      , base-unicode-symbols ^>= 0.2.4
+      , filepath             ^>= 1.4 && < 1.6
+      , optparse-applicative ^>= 0.18.1
 
     hs-source-dirs:   src
     default-language: GHC2021
