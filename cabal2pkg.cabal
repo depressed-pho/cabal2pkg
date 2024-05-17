@@ -26,13 +26,14 @@ executable cabal2pkg
         Cabal2Pkg.Cabal
         Cabal2Pkg.CmdLine
         Cabal2Pkg.Command.Init
+        Cabal2Pkg.Generator
         Cabal2Pkg.Generator.Makefile
         Cabal2Pkg.Utils
 
     build-depends:
         Cabal-syntax         ^>= 3.10.3
+      , aeson                ^>= 2.2.1
       , base                  == 4.*
-      , base-unicode-symbols ^>= 0.2.4
       , bytestring           ^>= 0.12.1
       , conduit              ^>= 1.3.5
       , conduit-extra        ^>= 1.3.6
@@ -41,12 +42,14 @@ executable cabal2pkg
       , filepath              >= 1.4
       , microstache          ^>= 1.0.2
       , optparse-applicative ^>= 0.18.1
+      , pretty-show          ^>= 1.10
       , primitive            ^>= 0.9
       , resourcet            ^>= 1.3.0
       , safe-exceptions      ^>= 0.1.7
       , tar-conduit          ^>= 0.4.1
       , template-haskell      >= 2.21
       , text                 ^>= 2.1.1
+      , transformers         ^>= 0.6.1
 
     hs-source-dirs:   src
     default-language: GHC2021
