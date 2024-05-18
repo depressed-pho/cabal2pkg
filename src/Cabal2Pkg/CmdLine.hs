@@ -173,19 +173,19 @@ debug msg =
   do d <- CLI $ asks optDebug
      when d $ liftIO $
        do pn <- T.pack <$> getProgName
-          hPutStrLn stderr (pn <> ": DEBUG: " <> msg)
+          hPutStrLn stderr (pn <> ": DEBUG: " <> T.strip msg)
 
 info :: MonadIO m => Text -> m ()
 info msg =
   liftIO $
   do pn <- T.pack <$> getProgName
-     hPutStrLn stderr (pn <> ": " <> msg)
+     hPutStrLn stderr (pn <> ": " <> T.strip msg)
 
 warn :: MonadIO m => Text -> m ()
 warn msg =
   liftIO $
   do pn <- T.pack <$> getProgName
-     hPutStrLn stderr (pn <> ": WARNING: " <> msg)
+     hPutStrLn stderr (pn <> ": WARNING: " <> T.strip msg)
 
 err :: MonadThrow m => Text -> m a
 err = throw . CommandError
