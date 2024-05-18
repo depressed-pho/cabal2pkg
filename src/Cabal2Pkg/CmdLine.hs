@@ -1,4 +1,6 @@
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE UndecidableInstances #-}
 module Cabal2Pkg.CmdLine
@@ -118,20 +120,19 @@ getOptions =
 
 
 data CommandError = CommandError { message :: Text }
-  deriving Show
-instance Exception CommandError
+  deriving (Show, Exception)
 
 
 newtype CLI a = CLI { unCLI :: ReaderT Options (ResourceT IO) a }
-  deriving ( Applicative
-           , Functor
-           , Monad
-           , MonadFix
-           , MonadIO
-           , MonadResource
-           , MonadThrow
-           , PrimMonad
-           )
+  deriving newtype ( Applicative
+                   , Functor
+                   , Monad
+                   , MonadFix
+                   , MonadIO
+                   , MonadResource
+                   , MonadThrow
+                   , PrimMonad
+                   )
 
 instance MonadFail CLI where
   fail :: String -> CLI a
@@ -167,11 +168,12 @@ maintainer =
      m1 <- liftIO $ lookupEnv "REPLYTO"
      pure $ T.pack <$> (m0 <|> m1)
 
-debug :: String -> CLI ()
+debug :: Text -> CLI ()
 debug msg =
   do d <- CLI $ asks optDebug
-     when d $
-       liftIO $ putStrLn msg
+     when d $ liftIO $
+       do pn <- T.pack <$> getProgName
+          hPutStrLn stderr (pn <> ": DEBUG: " <> msg)
 
 info :: MonadIO m => Text -> m ()
 info msg =

@@ -24,7 +24,7 @@ import GHC.Generics (Generic, Generically(..))
 
 data PackageMeta = PackageMeta
   { distName   :: Text
-  , categories :: [Text]
+  , categories :: Text
   , maintainer :: Text
   , comment    :: Text
   , license    :: Text
@@ -37,7 +37,7 @@ summariseCabal :: Text -> Maybe Text -> GenericPackageDescription -> PackageMeta
 summariseCabal category maintainer gpd =
   PackageMeta
   { distName   = T.pack . prettyShow . PD.package $ pd
-  , categories = [category]
+  , categories = category
   , maintainer = fromMaybe "pkgsrc-users@NetBSD.org" maintainer
   , comment    = T.pack . fromShortText . PD.synopsis $ pd
   , license    = license
