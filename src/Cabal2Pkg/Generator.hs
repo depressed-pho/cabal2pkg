@@ -33,11 +33,11 @@ data PackageMeta = PackageMeta
   deriving ToJSON via Generically PackageMeta
 
 
-summariseCabal :: Maybe Text -> GenericPackageDescription -> PackageMeta
-summariseCabal maintainer gpd =
+summariseCabal :: Text -> Maybe Text -> GenericPackageDescription -> PackageMeta
+summariseCabal category maintainer gpd =
   PackageMeta
   { distName   = T.pack . prettyShow . PD.package $ pd
-  , categories = [T.pack "FIXME"]
+  , categories = [category]
   , maintainer = fromMaybe "pkgsrc-users@NetBSD.org" maintainer
   , comment    = T.pack . fromShortText . PD.synopsis $ pd
   , license    = license

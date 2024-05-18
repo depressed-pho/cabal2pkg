@@ -1,13 +1,14 @@
+{-# OPTIONS_GHC -Wno-orphans #-}
 {-# LANGUAGE CPP #-}
 module Cabal2Pkg.Utils
   ( embedMustacheRelative
-  , unsafeEncodeUtf
   ) where
 
 import Control.Exception.Safe (throwIO)
 import Control.Monad.IO.Class (liftIO)
 import Data.ByteString.Lazy qualified as BL
 import Data.FileEmbed (makeRelativeToProject)
+import Data.String (IsString(..))
 import Data.Text qualified as T
 import Data.Text.Lazy.Encoding qualified as TL
 import Language.Haskell.TH (Q)
@@ -34,6 +35,13 @@ embedMustacheRelative path =
      -- think it's an API bug.
      either throwIO pure (compileMustacheText pName text)
   `bindCode` (unsafeCodeCoerce . liftData)
+
+
+-- |An orphan instance of IsString for OsPath. No idea why the upstream has
+-- this.
+instance IsString OsPath where
+  fromString :: String -> OsPath
+  fromString = unsafeEncodeUtf
 
 
 -- |A shim to unsafeEncodeUtf introduced in filepath-1.5.2
