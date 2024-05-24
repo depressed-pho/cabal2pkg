@@ -5,7 +5,7 @@ module Cabal2Pkg.Extractor.Dependency
   , extractDependency
   ) where
 
-import Control.Monad.IO.Class (MonadIO, liftIO)
+import Cabal2Pkg.CmdLine (CLI, installedPkgs)
 import Distribution.Types.Dependency qualified as C
 import Data.Aeson ((.=), ToJSON(..), Value, object)
 import Data.Text (Text)
@@ -44,6 +44,7 @@ instance ToJSON Dependency where
                  ]
 
 -- |Return 'False' if the dependency is bundled with the compiler.
-extractDependency :: MonadIO m => C.Dependency -> m (Maybe Dependency)
+extractDependency :: C.Dependency -> CLI (Maybe Dependency)
 extractDependency dep
-  = pure Nothing -- FIXME
+  = do ipi <- installedPkgs
+       pure Nothing

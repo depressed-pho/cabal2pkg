@@ -16,6 +16,7 @@ module Cabal2Pkg.CmdLine
   , maintainer
   , pkgFlags
   , ghcVersion
+  , installedPkgs
 
     -- * Message output
   , debug
@@ -32,22 +33,28 @@ import Control.Monad.Catch (MonadThrow)
 import Control.Monad.Fix (MonadFix)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Primitive (PrimMonad(..))
-import Control.Monad.Trans.Reader (ReaderT, asks, runReaderT)
 import Control.Monad.Trans.Resource (MonadResource, ResourceT, runResourceT)
+import Control.Monad.Trans.State (StateT, evalStateT, gets, modify')
 import Data.Bifunctor (first, second)
-import Data.Char (isSpace)
-import Data.List (dropWhileEnd)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as M
+import Data.Maybe (fromJust)
 import Data.String (fromString)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.IO (hPutStrLn)
 import Distribution.Parsec (eitherParsec)
+import Distribution.Simple.Compiler qualified as C
+import Distribution.Simple.GHC qualified as GHC
+import Distribution.Simple.PackageIndex (InstalledPackageIndex)
+import Distribution.Simple.Program.Db (ProgramDb)
+import Distribution.Simple.Program.Db qualified as C
+import Distribution.Simple.Program.Types qualified as C
 import Distribution.Types.Flag (FlagName)
 import Distribution.Types.Flag qualified as C
 import Distribution.Types.Version (Version)
-import GHC.Paths (ghc)
+import Distribution.Verbosity (silent)
+import GHC.Paths qualified as Paths
 import Options.Applicative
   ( (<**>), Parser, ReadM, argument, eitherReader, execParser, fullDesc, header
   , help, helper, long, metavar, option, progDesc, short, showDefault, str
@@ -60,7 +67,6 @@ import System.Exit (ExitCode(ExitFailure), exitWith)
 import System.IO (stderr, utf8, utf16le)
 import System.OsPath qualified as OP
 import System.OsPath ((</>), OsPath)
-import System.Process (readProcess)
 
 
 type FlagMap = Map FlagName Bool
@@ -105,7 +111,7 @@ optionsP =
       ( long "ghc" <>
         help "The path to the GHC executable" <>
         showDefault <>
-        value (fromString ghc) <>
+        value (fromString Paths.ghc) <>
         metavar "FILE"
       )
 
@@ -162,10 +168,25 @@ getOptions =
          pure $ opts { optPkgPath = dir }
 
 
+data Context
+  = Context
+    { ctxOptions :: !Options
+    , ctxProgDb  :: !(Maybe ProgramDb)
+    , ctxIPI     :: !(Maybe InstalledPackageIndex)
+    }
+
+initialCtx :: Options -> Context
+initialCtx opts
+  = Context
+    { ctxOptions = opts
+    , ctxProgDb  = Nothing
+    , ctxIPI     = Nothing
+    }
+
 data CommandError = CommandError { message :: Text }
   deriving (Show, Exception)
 
-newtype CLI a = CLI { unCLI :: ReaderT Options (ResourceT IO) a }
+newtype CLI a = CLI { unCLI :: StateT Context (ResourceT IO) a }
   deriving newtype ( Applicative
                    , Functor
                    , Monad
@@ -183,7 +204,7 @@ instance MonadFail CLI where
 runCLI :: CLI a -> IO a
 runCLI m =
   ( do opts <- getOptions
-       runResourceT (runReaderT (unCLI m) opts)
+       runResourceT (evalStateT (unCLI m) (initialCtx opts))
   )
   `catch`
   \(e :: CommandError) ->
@@ -191,11 +212,14 @@ runCLI m =
        hPutStrLn stderr (pn <> ": ERROR: " <> message e)
        exitWith (ExitFailure 1)
 
+options :: CLI Options
+options = CLI $ gets ctxOptions
+
 command :: CLI Command
-command = CLI $ asks optCommand
+command = optCommand <$> options
 
 pkgPath :: CLI OsPath
-pkgPath = CLI $ asks optPkgPath
+pkgPath = optPkgPath <$> options
 
 -- |@-d devel/foo@ => @devel@
 category :: CLI Text
@@ -211,20 +235,47 @@ maintainer =
      pure $ T.pack <$> (m0 <|> m1)
 
 pkgFlags :: CLI FlagMap
-pkgFlags = CLI $ asks optPkgFlags
+pkgFlags = optPkgFlags <$> options
+
+progDb :: CLI ProgramDb
+progDb
+  = do cache <- CLI $ gets ctxProgDb
+       case cache of
+         Just db -> pure db
+         Nothing -> do db <- mkDb
+                       CLI $ modify' $ \ctx -> ctx { ctxProgDb = Just db }
+                       pure db
+  where
+    mkDb :: CLI ProgramDb
+    mkDb = do ghcBin     <- OP.decodeUtf =<< (optGHCBin <$> options)
+              (_, _, db) <- liftIO $
+                            GHC.configure silent (Just ghcBin) Nothing C.defaultProgramDb
+              pure db
 
 ghcVersion :: CLI Version
 ghcVersion
-  = do ghcBin <- OP.decodeUtf =<< CLI (asks optGHCBin)
-       verStr <- liftIO $ readProcess ghcBin ["--numeric-version"] ""
-       either (err . T.pack) pure $ eitherParsec (trim verStr)
+  = do progs <- progDb
+       let ghc  = fromJust $ C.lookupKnownProgram "ghc" progs
+           ghc' = fromJust $ C.lookupProgram ghc progs
+           ver  = fromJust $ C.programVersion ghc'
+       pure ver
+
+installedPkgs :: CLI InstalledPackageIndex
+installedPkgs
+  = do cache <- CLI $ gets ctxIPI
+       case cache of
+         Just ipi -> pure ipi
+         Nothing  -> do ipi <- readDb
+                        CLI $ modify' $ \ ctx -> ctx { ctxIPI = Just ipi }
+                        pure ipi
   where
-    trim :: String -> String
-    trim = dropWhileEnd isSpace . dropWhile isSpace
+    readDb :: CLI InstalledPackageIndex
+    readDb = do progs <- progDb
+                liftIO $ GHC.getPackageDBContents silent C.GlobalPackageDB progs
 
 debug :: Text -> CLI ()
 debug msg =
-  do d <- CLI $ asks optDebug
+  do d <- optDebug <$> options
      when d $ liftIO $
        do pn <- T.pack <$> getProgName
           hPutStrLn stderr (pn <> ": DEBUG: " <> T.strip msg)

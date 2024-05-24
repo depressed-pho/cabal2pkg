@@ -12,7 +12,6 @@ import Cabal2Pkg.Extractor.Conditional
   ( Environment(..), CondBlock, extractCondBlock )
 import Cabal2Pkg.Extractor.Dependency (Dependency, extractDependency)
 import Control.Monad (unless)
-import Control.Monad.IO.Class (MonadIO)
 import Data.Aeson (ToJSON(..), Value)
 import Data.Foldable (foldl')
 import Data.Map.Strict qualified as M
@@ -77,10 +76,10 @@ extractComponents gpd
     pd :: C.PackageDescription
     pd = GPD.packageDescription gpd
 
-    extractLib :: MonadIO m => Environment -> C.CondTree C.ConfVar [C.Dependency] C.Library -> m ComponentMeta
+    extractLib :: Environment -> C.CondTree C.ConfVar [C.Dependency] C.Library -> CLI ComponentMeta
     extractLib = extractCondBlock extractContent extractOuter
       where
-        extractContent :: MonadIO m => C.Library -> m [Dependency]
+        extractContent :: C.Library -> CLI [Dependency]
         extractContent = (catMaybes <$>) . mapM extractDependency . C.targetBuildDepends . C.libBuildInfo
 
         extractOuter :: Applicative f => C.Library -> CondBlock [Dependency] -> f ComponentMeta

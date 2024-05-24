@@ -129,7 +129,6 @@ extractCondBlock extractContent extractOuter env = go
     extractFlagCond flag
       = case M.lookup flag (flags env) of
           Just b  -> Literal b
-          Nothing -> error (show env)
           Nothing -> error $ "Undefined flag `" <> C.unFlagName flag <>
                              "' appeared in a condition"
 
