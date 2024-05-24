@@ -5,8 +5,11 @@ module Cabal2Pkg.Extractor
   , summariseCabal
   ) where
 
+import Cabal2Pkg.CmdLine (CLI)
+import Cabal2Pkg.CmdLine qualified as CLI
+import Cabal2Pkg.Extractor.Component (ComponentMeta, extractComponents)
 import Cabal2Pkg.Extractor.License (extractLicense)
-import Data.Aeson (ToJSON)
+import Data.Aeson (ToJSON(..))
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -20,25 +23,30 @@ import GHC.Generics (Generic, Generically(..))
 
 
 data PackageMeta = PackageMeta
-  { distName   :: Text
-  , categories :: [Text]
-  , maintainer :: Text
-  , comment    :: Text
-  , license    :: Text
+  { distName   :: !Text
+  , categories :: ![Text]
+  , maintainer :: !Text
+  , comment    :: !Text
+  , license    :: !Text
+  , components :: ![ComponentMeta]
   }
   deriving (Generic, Show)
   deriving ToJSON via Generically PackageMeta
 
 
-summariseCabal :: Text -> Maybe Text -> GenericPackageDescription -> PackageMeta
-summariseCabal category maintainer gpd
-  = PackageMeta
-    { distName   = T.pack . prettyShow . PD.package $ pd
-    , categories = [category]
-    , maintainer = fromMaybe "pkgsrc-users@NetBSD.org" maintainer
-    , comment    = T.pack . fromShortText . PD.synopsis $ pd
-    , license    = extractLicense pd
-    }
+summariseCabal :: GenericPackageDescription -> CLI PackageMeta
+summariseCabal gpd
+  = do cat <- CLI.category
+       mtr <- CLI.maintainer
+       cs  <- extractComponents gpd
+       pure PackageMeta
+         { distName   = T.pack . prettyShow . PD.package $ pd
+         , categories = [cat]
+         , maintainer = fromMaybe "pkgsrc-users@NetBSD.org" mtr
+         , comment    = T.pack . fromShortText . PD.synopsis $ pd
+         , license    = extractLicense pd
+         , components = cs
+         }
   where
     pd :: PackageDescription
     pd = GPD.packageDescription gpd
