@@ -27,14 +27,15 @@ module Cabal2Pkg.CmdLine
 
 import Cabal2Pkg.Utils ()
 import Control.Applicative ((<|>), many)
+import Control.Concurrent.Deferred (Deferred, defer, force)
 import Control.Exception.Safe (Exception(..), catch, throw)
 import Control.Monad (unless, when)
 import Control.Monad.Catch (MonadThrow)
 import Control.Monad.Fix (MonadFix)
-import Control.Monad.IO.Class (MonadIO, liftIO)
+import Control.Monad.IO.Unlift (MonadIO, MonadUnliftIO, liftIO)
 import Control.Monad.Primitive (PrimMonad(..))
+import Control.Monad.Trans.Reader (ReaderT, runReaderT, asks)
 import Control.Monad.Trans.Resource (MonadResource, ResourceT, runResourceT)
-import Control.Monad.Trans.State (StateT, evalStateT, gets, modify')
 import Data.Bifunctor (first, second)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as M
@@ -67,6 +68,7 @@ import System.Exit (ExitCode(ExitFailure), exitWith)
 import System.IO (stderr, utf8, utf16le)
 import System.OsPath qualified as OP
 import System.OsPath ((</>), OsPath)
+import Text.Show.Pretty (ppShow)
 
 
 type FlagMap = Map FlagName Bool
@@ -147,8 +149,8 @@ commandP =
     updateP = pure Update
 
 
-getOptions :: IO Options
-getOptions =
+parseOptions :: IO Options
+parseOptions =
   do opts <- execParser spec
      validatePkgPath opts
   where
@@ -171,22 +173,40 @@ getOptions =
 data Context
   = Context
     { ctxOptions :: !Options
-    , ctxProgDb  :: !(Maybe ProgramDb)
-    , ctxIPI     :: !(Maybe InstalledPackageIndex)
+    , ctxProgDb  :: !(Deferred CLI ProgramDb)
+    , ctxIPI     :: !(Deferred CLI InstalledPackageIndex)
     }
 
-initialCtx :: Options -> Context
+initialCtx :: MonadIO m => Options -> m Context
 initialCtx opts
-  = Context
-    { ctxOptions = opts
-    , ctxProgDb  = Nothing
-    , ctxIPI     = Nothing
-    }
+  = do progs <- defer mkProgDb
+       ipi   <- defer readPkgDb
+       pure Context
+         { ctxOptions = opts
+         , ctxProgDb  = progs
+         , ctxIPI     = ipi
+         }
+
+mkProgDb :: CLI ProgramDb
+mkProgDb
+  = do debug "Configuring program database..."
+       ghcBin     <- OP.decodeUtf =<< (optGHCBin <$> options)
+       (_, _, db) <- liftIO $
+                     GHC.configure silent (Just ghcBin) Nothing C.defaultProgramDb
+       debug . T.pack $ ppShow db
+       pure db
+
+readPkgDb :: CLI InstalledPackageIndex
+readPkgDb
+  = do debug "Reading installed package index..."
+       progs <- progDb
+       liftIO $ GHC.getPackageDBContents silent C.GlobalPackageDB progs
+
 
 data CommandError = CommandError { message :: Text }
   deriving (Show, Exception)
 
-newtype CLI a = CLI { unCLI :: StateT Context (ResourceT IO) a }
+newtype CLI a = CLI { unCLI :: ReaderT Context (ResourceT IO) a }
   deriving newtype ( Applicative
                    , Functor
                    , Monad
@@ -194,6 +214,7 @@ newtype CLI a = CLI { unCLI :: StateT Context (ResourceT IO) a }
                    , MonadIO
                    , MonadResource
                    , MonadThrow
+                   , MonadUnliftIO
                    , PrimMonad
                    )
 
@@ -203,8 +224,9 @@ instance MonadFail CLI where
 
 runCLI :: CLI a -> IO a
 runCLI m =
-  ( do opts <- getOptions
-       runResourceT (evalStateT (unCLI m) (initialCtx opts))
+  ( do opts <- parseOptions
+       ctx  <- initialCtx opts
+       runResourceT (runReaderT (unCLI m) ctx)
   )
   `catch`
   \(e :: CommandError) ->
@@ -213,7 +235,7 @@ runCLI m =
        exitWith (ExitFailure 1)
 
 options :: CLI Options
-options = CLI $ gets ctxOptions
+options = CLI $ asks ctxOptions
 
 command :: CLI Command
 command = optCommand <$> options
@@ -238,19 +260,7 @@ pkgFlags :: CLI FlagMap
 pkgFlags = optPkgFlags <$> options
 
 progDb :: CLI ProgramDb
-progDb
-  = do cache <- CLI $ gets ctxProgDb
-       case cache of
-         Just db -> pure db
-         Nothing -> do db <- mkDb
-                       CLI $ modify' $ \ctx -> ctx { ctxProgDb = Just db }
-                       pure db
-  where
-    mkDb :: CLI ProgramDb
-    mkDb = do ghcBin     <- OP.decodeUtf =<< (optGHCBin <$> options)
-              (_, _, db) <- liftIO $
-                            GHC.configure silent (Just ghcBin) Nothing C.defaultProgramDb
-              pure db
+progDb = (CLI $ asks ctxProgDb) >>= force
 
 ghcVersion :: CLI Version
 ghcVersion
@@ -261,17 +271,7 @@ ghcVersion
        pure ver
 
 installedPkgs :: CLI InstalledPackageIndex
-installedPkgs
-  = do cache <- CLI $ gets ctxIPI
-       case cache of
-         Just ipi -> pure ipi
-         Nothing  -> do ipi <- readDb
-                        CLI $ modify' $ \ ctx -> ctx { ctxIPI = Just ipi }
-                        pure ipi
-  where
-    readDb :: CLI InstalledPackageIndex
-    readDb = do progs <- progDb
-                liftIO $ GHC.getPackageDBContents silent C.GlobalPackageDB progs
+installedPkgs = (CLI $ asks ctxIPI) >>= force
 
 debug :: Text -> CLI ()
 debug msg =

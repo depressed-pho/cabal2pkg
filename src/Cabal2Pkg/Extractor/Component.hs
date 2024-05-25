@@ -23,7 +23,6 @@ import Distribution.Pretty (prettyShow)
 import Distribution.Types.BuildInfo qualified as C
 import Distribution.Types.CondTree qualified as C
 import Distribution.Types.ConfVar qualified as C
-import Distribution.Types.Dependency qualified as C
 import Distribution.Types.Flag qualified as C
 import Distribution.Types.GenericPackageDescription (GenericPackageDescription)
 import Distribution.Types.GenericPackageDescription qualified as GPD
@@ -33,6 +32,7 @@ import Distribution.Types.PackageDescription qualified as C
 import Distribution.Types.PackageId qualified as C
 import Distribution.Types.UnqualComponentName qualified as C
 import GHC.Generics (Generic, Generically(..))
+import UnliftIO.Async (mapConcurrently)
 
 
 data ComponentMeta = ComponentMeta
@@ -76,11 +76,15 @@ extractComponents gpd
     pd :: C.PackageDescription
     pd = GPD.packageDescription gpd
 
-    extractLib :: Environment -> C.CondTree C.ConfVar [C.Dependency] C.Library -> CLI ComponentMeta
+    extractLib :: Environment -> C.CondTree C.ConfVar c C.Library -> CLI ComponentMeta
     extractLib = extractCondBlock extractContent extractOuter
       where
         extractContent :: C.Library -> CLI [Dependency]
-        extractContent = (catMaybes <$>) . mapM extractDependency . C.targetBuildDepends . C.libBuildInfo
+        extractContent
+          = (catMaybes <$>)
+          . mapConcurrently extractDependency
+          . C.targetBuildDepends
+          . C.libBuildInfo
 
         extractOuter :: Applicative f => C.Library -> CondBlock [Dependency] -> f ComponentMeta
         extractOuter lib deps

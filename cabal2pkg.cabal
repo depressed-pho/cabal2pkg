@@ -15,6 +15,16 @@ extra-doc-files:    CHANGELOG.md
 extra-source-files:
     templates/*.ede
 
+flag rtsopts
+    description: Build the executable with RTS options enabled.
+    manual: True
+    default: True
+
+flag threaded
+    description: Build the executable with the threaded RTS.
+    manual: True
+    default: True
+
 common warnings
     ghc-options: -Wall -Wextra -Wunused-packages
 
@@ -32,6 +42,7 @@ executable cabal2pkg
         Cabal2Pkg.Extractor.Dependency
         Cabal2Pkg.Extractor.License
         Cabal2Pkg.Utils
+        Control.Concurrent.Deferred
 
     build-depends:
         Cabal                ^>= 3.10.2
@@ -57,7 +68,14 @@ executable cabal2pkg
       , template-haskell      >= 2.21
       , text                 ^>= 2.1.1
       , transformers         ^>= 0.6.1
---      , unordered-containers ^>= 0.2.17
+      , unliftio             ^>= 0.2.25
+      , unliftio-core        ^>= 0.2.1
+
+    if flag(rtsopts)
+        ghc-options: -rtsopts
+
+    if flag(threaded)
+        ghc-options: -threaded
 
     hs-source-dirs:   src
     default-language: GHC2021

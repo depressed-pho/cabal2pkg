@@ -10,6 +10,7 @@ module Cabal2Pkg.Extractor.Conditional
   ) where
 
 import Cabal2Pkg.CmdLine (FlagMap)
+import Control.Monad.IO.Unlift (MonadUnliftIO)
 import Data.Aeson ((.=), ToJSON(..), Value, object)
 import Data.Map.Strict qualified as M
 import Data.Text (Text)
@@ -23,6 +24,7 @@ import Distribution.Types.Version (Version)
 import Distribution.Types.VersionRange (VersionRange, withinRange)
 import GHC.Generics (Generic, Generically(..))
 import GHC.Stack (HasCallStack)
+import UnliftIO.Async (concurrently, mapConcurrently)
 
 
 data Environment = Environment
@@ -76,7 +78,7 @@ instance ToJSON Condition where
 -- contained in @condTreeData :: a@? To confuse people trying to work with
 -- the fucking AST?
 extractCondBlock :: forall m a a' _c c' .
-                    (HasCallStack, Monad m)
+                    (HasCallStack, MonadUnliftIO m)
                  => (a -> m c')
                  -> (a -> CondBlock c' -> m a')
                  -> Environment
@@ -91,8 +93,9 @@ extractCondBlock extractContent extractOuter env = go
 
     mkBlock :: HasCallStack => C.CondTree C.ConfVar _c a -> m (CondBlock c')
     mkBlock tree
-      = do c  <- extractContent (C.condTreeData tree)
-           bs <- traverse extractBranch (C.condTreeComponents tree)
+      = do (c, bs) <- concurrently
+                      (extractContent (C.condTreeData tree))
+                      (mapConcurrently extractBranch (C.condTreeComponents tree))
            pure CondBlock
              { always   = c
              , branches = bs
@@ -100,8 +103,9 @@ extractCondBlock extractContent extractOuter env = go
 
     extractBranch :: HasCallStack => C.CondBranch C.ConfVar _c a -> m (CondBranch c')
     extractBranch branch
-      = do ifT <- mkBlock (C.condBranchIfTrue branch)
-           ifE <- traverse mkBlock (C.condBranchIfFalse branch)
+      = do (ifT, ifE) <- concurrently
+                         (mkBlock (C.condBranchIfTrue branch))
+                         (mapConcurrently mkBlock (C.condBranchIfFalse branch))
            pure CondBranch
              { condition = extractCondition (C.condBranchCondition branch)
              , ifTrue    = ifT
