@@ -5,22 +5,28 @@ module Cabal2Pkg.Extractor.Dependency
   , extractDependency
   ) where
 
-import Cabal2Pkg.CmdLine (CLI, installedPkgs)
+import Cabal2Pkg.CmdLine (CLI, installedPkgs, srcDb)
+import Control.Monad (join)
+import Database.Pkgsrc.SrcDb (Package)
+import Database.Pkgsrc.SrcDb qualified as SrcDb
+import Distribution.Parsec (eitherParsec)
 import Distribution.Simple.PackageIndex qualified as C
 import Distribution.Types.Dependency qualified as C
 import Distribution.Types.InstalledPackageInfo qualified as C
 import Distribution.Types.PackageName qualified as C
 import Distribution.Types.Version (Version)
+import Distribution.Types.VersionRange qualified as C
 import Data.Aeson ((.=), ToJSON(..), Value, object)
 import Data.List (isSuffixOf)
-import Data.Text (Text)
+import Data.Text.Short (ShortText)
+import Data.Text.Short qualified as TS
 
 
 -- |Dependency on a pkgsrc package.
 data Dependency
   = KnownDependency
     { -- |The PKGPATH, such as @"math/hs-semigroupoids"@.
-      pkgPath :: !Text
+      pkgPath :: !ShortText
       -- |Whether the package needs to be listed in
       -- @HASKELL_UNRESTRICT_DEPENDENCIES@.
     , needsUnrestricting :: !Bool
@@ -30,7 +36,7 @@ data Dependency
       -- constructor is used when 'Cabal2Pkg.Extractor.summariseCabal'
       -- cannot find the corresponding package in pkgsrc or bundled
       -- libraries in GHC.
-      name :: !Text
+      name :: !ShortText
     }
   deriving Show
 
@@ -39,12 +45,12 @@ instance ToJSON Dependency where
   toJSON dep
     = case dep of
         KnownDependency {..} ->
-          object [ "kind"               .= ("known" :: Text)
+          object [ "kind"               .= ("known" :: ShortText)
                  , "pkgPath"            .= pkgPath
                  , "needsUnrestricting" .= needsUnrestricting
                  ]
         UnknownDependency {..} ->
-          object [ "kind" .= ("unknown" :: Text)
+          object [ "kind" .= ("unknown" :: ShortText)
                  , "name" .= name
                  ]
 
@@ -55,7 +61,24 @@ extractDependency dep
        if isBuiltin ipi (C.depPkgName dep)
          then pure Nothing
          else do m <- findPkgsrcPkg (C.depPkgName dep)
-                 fail (show m)
+                 case m of
+                   Just (path, ver) ->
+                     pure . Just $ found path ver
+                   Nothing ->
+                     pure . Just $ notFound
+  where
+    found :: ShortText -> Version -> Dependency
+    found path ver
+      = KnownDependency
+        { pkgPath            = path
+        , needsUnrestricting = not $ C.withinRange ver (C.depVerRange dep)
+        }
+
+    notFound :: Dependency
+    notFound
+      = UnknownDependency
+        { name = TS.fromString . C.unPackageName . C.depPkgName $ dep
+        }
 
 isBuiltin :: C.InstalledPackageIndex -> C.PackageName -> Bool
 isBuiltin ipi name
@@ -71,6 +94,34 @@ isBuiltin ipi name
       _ ->
         False
 
-findPkgsrcPkg :: C.PackageName -> CLI (Maybe (Text, Version))
+-- |Search for a pkgsrc package case-insensitively, both with and without
+-- the @hs-@ prefix. Only packages that include @mk/haskell.mk@ are
+-- returned. The function returns a pair of its @PKGPATH@ and
+-- @PKGVERSION_NOREV@.
+findPkgsrcPkg :: C.PackageName -> CLI (Maybe (ShortText, Version))
 findPkgsrcPkg name
-  = error "FIXME"
+  = do db <- srcDb
+       -- Would it be beneficial to perform these two searches
+       -- concurrently? I'd say no, because most of the time packages with
+       -- the prefix "hs-" is what we would find, and the other search
+       -- would just be a waste of CPU cycles.
+       p0 <- SrcDb.findPackageCI db ("hs-" <> name')
+       case p0 of
+         Just p  -> found p
+         Nothing ->
+           do p1 <- SrcDb.findPackageCI db name'
+              join <$> traverse found p1
+  where
+    name' :: ShortText
+    name' = TS.fromString . C.unPackageName $ name
+
+    found :: Package CLI -> CLI (Maybe (ShortText, Version))
+    found pkg
+      = do hask <- SrcDb.includesHaskellMk pkg
+           if hask
+             then do ver <- toCabalVer =<< SrcDb.pkgVersionNoRev pkg
+                     pure $ Just (SrcDb.pkgPath pkg, ver)
+             else pure Nothing
+
+    toCabalVer :: MonadFail m => ShortText -> m Version
+    toCabalVer = either fail pure . eitherParsec . TS.toString

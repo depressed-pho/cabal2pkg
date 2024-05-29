@@ -41,8 +41,11 @@ executable cabal2pkg
         Cabal2Pkg.Extractor.Conditional
         Cabal2Pkg.Extractor.Dependency
         Cabal2Pkg.Extractor.License
+        Cabal2Pkg.Static
         Cabal2Pkg.Utils
         Control.Concurrent.Deferred
+        Data.Text.Short.Orphans
+        Database.Pkgsrc.SrcDb
 
     build-depends:
         Cabal                ^>= 3.10.2
@@ -50,6 +53,7 @@ executable cabal2pkg
       , aeson                ^>= 2.2.1
       , base                  == 4.*
       , bytestring           ^>= 0.12.1
+      , case-insensitive     ^>= 1.2.1
       , conduit              ^>= 1.3.5
       , conduit-extra        ^>= 1.3.6
       , containers           ^>= 0.6.8
@@ -64,12 +68,16 @@ executable cabal2pkg
       , primitive            ^>= 0.9
       , resourcet            ^>= 1.3.0
       , safe-exceptions      ^>= 0.1.7
+      , stm                  ^>= 2.5.2
       , tar-conduit          ^>= 0.4.1
       , template-haskell      >= 2.21
       , text                 ^>= 2.1.1
+      , text-short           ^>= 0.1.5
       , transformers         ^>= 0.6.1
+      , typed-process        ^>= 0.2.11
       , unliftio             ^>= 0.2.25
       , unliftio-core        ^>= 0.2.1
+      , unordered-containers ^>= 0.2.20
 
     if flag(rtsopts)
         ghc-options: -rtsopts

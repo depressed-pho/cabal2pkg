@@ -2,6 +2,7 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE UndecidableInstances #-}
 module Cabal2Pkg.CmdLine
   ( CLI
@@ -17,6 +18,7 @@ module Cabal2Pkg.CmdLine
   , pkgFlags
   , ghcVersion
   , installedPkgs
+  , srcDb
 
     -- * Message output
   , debug
@@ -25,6 +27,7 @@ module Cabal2Pkg.CmdLine
   , err
   ) where
 
+import Cabal2Pkg.Static (makeQ)
 import Cabal2Pkg.Utils ()
 import Control.Applicative ((<|>), many)
 import Control.Concurrent.Deferred (Deferred, defer, force)
@@ -44,6 +47,7 @@ import Data.String (fromString)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.IO (hPutStrLn)
+import Database.Pkgsrc.SrcDb (SrcDb, createSrcDb)
 import Distribution.Parsec (eitherParsec)
 import Distribution.Simple.Compiler qualified as C
 import Distribution.Simple.GHC qualified as GHC
@@ -80,6 +84,7 @@ data Options
     , optPkgPath  :: !OsPath
     , optPkgFlags :: !FlagMap
     , optGHCBin   :: !OsPath
+    , optMakeBin  :: !OsPath
     }
   deriving (Show)
 
@@ -114,6 +119,13 @@ optionsP =
         help "The path to the GHC executable" <>
         showDefault <>
         value (fromString Paths.ghc) <>
+        metavar "FILE"
+      )
+  <*> option path
+      ( long "make" <>
+        help "The path to the BSD make(1) command" <>
+        showDefault <>
+        value $$makeQ <>
         metavar "FILE"
       )
 
@@ -175,16 +187,19 @@ data Context
     { ctxOptions :: !Options
     , ctxProgDb  :: !(Deferred CLI ProgramDb)
     , ctxIPI     :: !(Deferred CLI InstalledPackageIndex)
+    , ctxSrcDb   :: !(Deferred CLI (SrcDb CLI))
     }
 
-initialCtx :: MonadIO m => Options -> m Context
+initialCtx :: (MonadThrow m, MonadUnliftIO m) => Options -> m Context
 initialCtx opts
   = do progs <- defer mkProgDb
        ipi   <- defer readPkgDb
+       sdb   <- defer mkSrcDb
        pure Context
          { ctxOptions = opts
          , ctxProgDb  = progs
          , ctxIPI     = ipi
+         , ctxSrcDb   = sdb
          }
 
 mkProgDb :: CLI ProgramDb
@@ -201,6 +216,12 @@ readPkgDb
   = do debug "Reading installed package index..."
        progs <- progDb
        liftIO $ GHC.getPackageDBContents silent C.GlobalPackageDB progs
+
+mkSrcDb :: CLI (SrcDb CLI)
+mkSrcDb
+  = do make <- optMakeBin <$> options
+       root <- OP.takeDirectory . OP.takeDirectory <$> pkgPath
+       createSrcDb make root
 
 
 data CommandError = CommandError { message :: Text }
@@ -272,6 +293,9 @@ ghcVersion
 
 installedPkgs :: CLI InstalledPackageIndex
 installedPkgs = (CLI $ asks ctxIPI) >>= force
+
+srcDb :: CLI (SrcDb CLI)
+srcDb = (CLI $ asks ctxSrcDb) >>= force
 
 debug :: Text -> CLI ()
 debug msg =

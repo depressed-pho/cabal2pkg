@@ -17,9 +17,6 @@ import Data.Text.Lazy qualified as LT
 import GHC.Stack (HasCallStack, callStack, popCallStack, prettyCallStack)
 import Language.Haskell.TH (Q)
 import Language.Haskell.TH.Syntax (Code, unsafeCodeCoerce)
-#if !MIN_VERSION_filepath(1, 5, 2)
-import System.IO.Unsafe (unsafePerformIO)
-#endif
 import System.OsPath qualified as OP
 import System.OsPath (OsPath)
 import Text.EDE (Template)
@@ -68,9 +65,9 @@ instance IsString OsPath where
 
 
 -- |A shim to unsafeEncodeUtf introduced in filepath-1.5.2
-unsafeEncodeUtf :: String -> OsPath
+unsafeEncodeUtf :: HasCallStack => String -> OsPath
 #if MIN_VERSION_filepath(1, 5, 2)
 unsafeEncodeUtf = OP.unsafeEncodeUtf
 #else
-unsafeEncodeUtf = unsafePerformIO . OP.encodeUtf
+unsafeEncodeUtf = either (error . show) id . OP.encodeUtf
 #endif
