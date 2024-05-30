@@ -1,40 +1,43 @@
+{-# LANGUAGE DeriveAnyClass #-} -- for deriving Hashable
 {-# LANGUAGE OverloadedStrings #-}
-module Cabal2Pkg.Extractor.ExeDependency
-  ( ExeDependency(..)
-  , extractExeDependency
+module Cabal2Pkg.Extractor.Dependency.Executable
+  ( ExeDep(..)
+  , extractExeDep
   ) where
 
 import Cabal2Pkg.CmdLine (CLI, srcDb)
+import Data.Hashable (Hashable(..))
 import Database.Pkgsrc.SrcDb qualified as SrcDb
 import Distribution.Types.ExeDependency qualified as C
 import Distribution.Types.PackageName qualified as C
 import Data.Text.Short (ShortText)
 import Data.Text.Short qualified as TS
+import GHC.Generics (Generic)
 
 
 -- |Dependency on a tool provided by a pkgsrc package.
-data ExeDependency
-  = KnownExeDependency
+data ExeDep
+  = KnownExe
     { -- |The name of the tool to be listed in @USE_TOOLS@.
       name :: !ShortText
     }
-  | UnknownExeDependency
+  | UnknownExe
     { -- |The name of a Cabal package, such as @"alex"@. This constructor
       -- is used when 'Cabal2Pkg.Extractor.summariseCabal' cannot find the
       -- corresponding package in pkgsrc.
       name :: !ShortText
     }
-  deriving Show
+  deriving (Eq, Generic, Hashable, Show)
 
 
-extractExeDependency :: C.ExeDependency -> CLI ExeDependency
-extractExeDependency (C.ExeDependency pkgName _ _)
+extractExeDep :: C.ExeDependency -> CLI ExeDep
+extractExeDep (C.ExeDependency pkgName _ _)
   = do m <- findPkgsrcPkg pkgName
        case m of
          Just name ->
-           pure . KnownExeDependency $ name
+           pure . KnownExe $ name
          Nothing ->
-           pure . UnknownExeDependency . TS.fromString . C.unPackageName $ pkgName
+           pure . UnknownExe . TS.fromString . C.unPackageName $ pkgName
 
 
 -- |Search for a pkgsrc package case-insensitively, both with and without
