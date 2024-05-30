@@ -158,6 +158,8 @@ scanPkgs makePath root catName
              , pIncludesHaskellMk = HM.member "HASKELL_PKG_NAME" <$> vars
              }
 
+    -- |This is obviously the slowest part of cabal2pkg. Parallelise calls
+    -- of it at all costs.
     getMakeVars :: OsPath
                 -> HashSet ShortText
                 -> m (HashMap ShortText ShortText)

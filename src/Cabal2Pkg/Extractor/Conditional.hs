@@ -12,6 +12,7 @@ module Cabal2Pkg.Extractor.Conditional
 import Cabal2Pkg.CmdLine (FlagMap)
 import Control.Monad.IO.Unlift (MonadUnliftIO)
 import Data.Aeson ((.=), ToJSON(..), Value, object)
+import Data.Foldable (foldl')
 import Data.Map.Strict qualified as M
 import Data.Text (Text)
 import Distribution.Compiler qualified as C
@@ -24,8 +25,9 @@ import Distribution.Types.Version (Version)
 import Distribution.Types.VersionRange (VersionRange, withinRange)
 import GHC.Generics (Generic, Generically(..))
 import GHC.Stack (HasCallStack)
-import UnliftIO.Async (concurrently, mapConcurrently)
 
+class Simplify a where
+  simplify :: a -> a
 
 data Environment = Environment
   { flags      :: !FlagMap
@@ -38,8 +40,8 @@ data CondBlock a = CondBlock
   , branches  :: ![CondBranch a]
   }
   deriving (Generic, Show)
-  deriving ToJSON via Generically (CondBlock a)
-
+  deriving Semigroup via Generically (CondBlock a)
+  deriving ToJSON    via Generically (CondBlock a)
 
 data CondBranch a = CondBranch
   { condition  :: !Condition
@@ -48,7 +50,6 @@ data CondBranch a = CondBranch
   }
   deriving (Generic, Show)
   deriving ToJSON via Generically (CondBranch a)
-
 
 -- |An intermediate data type for Cabal conditions.
 data Condition
@@ -78,7 +79,7 @@ instance ToJSON Condition where
 -- contained in @condTreeData :: a@? To confuse people trying to work with
 -- the fucking AST?
 extractCondBlock :: forall m a a' _c c' .
-                    (HasCallStack, MonadUnliftIO m)
+                    (HasCallStack, MonadUnliftIO m, Semigroup (m c'))
                  => (a -> m c')
                  -> (a -> CondBlock c' -> m a')
                  -> Environment
@@ -88,29 +89,40 @@ extractCondBlock extractContent extractOuter env = go
   where
     go :: HasCallStack => C.CondTree C.ConfVar _c a -> m a'
     go tree
-      = do block <- mkBlock tree
+      = do block <- forceBlock . simplify $ mkBlock tree
            extractOuter (C.condTreeData tree) block
 
-    mkBlock :: HasCallStack => C.CondTree C.ConfVar _c a -> m (CondBlock c')
-    mkBlock tree
-      = do (c, bs) <- concurrently
-                      (extractContent (C.condTreeData tree))
-                      (mapConcurrently extractBranch (C.condTreeComponents tree))
-           pure CondBlock
-             { always   = c
-             , branches = bs
-             }
+    forceBlock :: HasCallStack => CondBlock (m c') -> m (CondBlock c')
+    forceBlock (CondBlock {..})
+      = CondBlock
+        <$> always
+        <*> traverse forceBranch branches
 
-    extractBranch :: HasCallStack => C.CondBranch C.ConfVar _c a -> m (CondBranch c')
+    forceBranch :: HasCallStack => CondBranch (m c') -> m (CondBranch c')
+    forceBranch (CondBranch {..})
+      = CondBranch
+        <$> pure condition
+        <*> forceBlock ifTrue
+        <*> traverse forceBlock ifFalse
+
+    mkBlock :: HasCallStack
+            => C.CondTree C.ConfVar _c a
+            -> (CondBlock (m c'))
+    mkBlock tree
+      = CondBlock
+        { always   = extractContent $ C.condTreeData tree
+        , branches = extractBranch <$> C.condTreeComponents tree
+        }
+
+    extractBranch :: HasCallStack
+                  => C.CondBranch C.ConfVar _c a
+                  -> CondBranch (m c')
     extractBranch branch
-      = do (ifT, ifE) <- concurrently
-                         (mkBlock (C.condBranchIfTrue branch))
-                         (mapConcurrently mkBlock (C.condBranchIfFalse branch))
-           pure CondBranch
-             { condition = extractCondition (C.condBranchCondition branch)
-             , ifTrue    = ifT
-             , ifFalse   = ifE
-             }
+      = CondBranch
+        { condition = extractCondition $ C.condBranchCondition branch
+        , ifTrue    = mkBlock $ C.condBranchIfTrue branch
+        , ifFalse   = mkBlock <$> C.condBranchIfFalse branch
+        }
 
     extractCondition :: HasCallStack => C.Condition C.ConfVar -> Condition
     extractCondition c
@@ -209,3 +221,57 @@ extractArchCond arch
         { expression = expr
         , needsPrefs = True
         }
+
+-- |For each branch in a 'CondBlock', see if its 'condition' can be folded
+-- to a constant. If it folds to 'True' merge its 'ifTrue' back to the
+-- parent node and discard its 'ifFalse'. If it folds to 'False' we do the
+-- opposite. This means @'CondBlock' a@ has to form a semigroup.
+instance Semigroup a => Simplify (CondBlock a) where
+  simplify block
+    = foldl' go (CondBlock (always block) []) (branches block)
+    where
+      go :: CondBlock a -> CondBranch a -> CondBlock a
+      go bl br
+        = let br' = simplify br
+          in case simplify (condition br') of
+               Literal True  -> bl <> ifTrue br'
+               Literal False -> maybe bl (bl <>) (ifFalse br')
+               _             -> bl { branches = branches bl <> [br'] }
+
+instance Semigroup a => Simplify (CondBranch a) where
+  simplify (CondBranch {..})
+    = CondBranch
+      { condition = simplify condition
+      , ifTrue    = simplify ifTrue
+      , ifFalse   = simplify <$> ifFalse
+      }
+
+instance Simplify Condition where
+  simplify c@(Literal _) = c
+
+  simplify (Not c)
+    = case simplify c of
+        Literal b -> Literal (not b)
+        c'        -> Not c'
+
+  simplify (Or a b)
+    = case simplify a of
+        Literal True  -> Literal True
+        Literal False -> simplify b
+        a'            ->
+          case simplify b of
+            Literal True  -> Literal True
+            Literal False -> a'
+            b'            -> Or a' b'
+
+  simplify (And a b)
+    = case simplify a of
+        Literal True  -> simplify b
+        Literal False -> Literal False
+        a'            ->
+          case simplify b of
+            Literal True  -> a'
+            Literal False -> Literal False
+            b'            -> And a' b'
+
+  simplify c@(Expr {}) = c

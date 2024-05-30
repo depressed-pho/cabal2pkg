@@ -243,6 +243,12 @@ instance MonadFail CLI where
   fail :: String -> CLI a
   fail = err . T.pack
 
+instance Monoid a => Monoid (CLI a) where
+  mempty = pure mempty
+
+instance Semigroup a => Semigroup (CLI a) where
+  (<>) = liftA2 (<>)
+
 runCLI :: CLI a -> IO a
 runCLI m =
   ( do opts <- parseOptions
