@@ -11,7 +11,6 @@ module Cabal2Pkg.Extractor.Conditional
 
 import Cabal2Pkg.CmdLine (FlagMap)
 import Control.Monad.IO.Unlift (MonadUnliftIO)
-import Data.Aeson ((.=), ToJSON(..), Value, object)
 import Data.Foldable (foldl')
 import Data.Map.Strict qualified as M
 import Data.Text (Text)
@@ -41,7 +40,6 @@ data CondBlock a = CondBlock
   }
   deriving (Generic, Show)
   deriving Semigroup via Generically (CondBlock a)
-  deriving ToJSON    via Generically (CondBlock a)
 
 data CondBranch a = CondBranch
   { condition  :: !Condition
@@ -49,7 +47,6 @@ data CondBranch a = CondBranch
   , ifFalse    :: !(Maybe (CondBlock a))
   }
   deriving (Generic, Show)
-  deriving ToJSON via Generically (CondBranch a)
 
 -- |An intermediate data type for Cabal conditions.
 data Condition
@@ -62,15 +59,6 @@ data Condition
     , needsPrefs :: !Bool
     }
   deriving Show
-
-instance ToJSON Condition where
-  toJSON :: Condition -> Value
-  toJSON (Literal b) = object [ "literal"    .= b          ]
-  toJSON (Not c    ) = object [ "not"        .= c          ]
-  toJSON (Or  ca cb) = object [ "or"         .= [toJSON ca, toJSON cb] ]
-  toJSON (And ca cb) = object [ "and"        .= [toJSON ca, toJSON cb] ]
-  toJSON (Expr {..}) = object [ "expression" .= expression
-                              , "needsPrefs" .= needsPrefs ]
 
 
 -- |Conditionals in the Cabal AST is fucking irritatingly

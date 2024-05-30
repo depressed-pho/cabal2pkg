@@ -16,13 +16,12 @@ import Distribution.Types.InstalledPackageInfo qualified as C
 import Distribution.Types.PackageName qualified as C
 import Distribution.Types.Version (Version)
 import Distribution.Types.VersionRange qualified as C
-import Data.Aeson ((.=), ToJSON(..), Value, object)
 import Data.List (isSuffixOf)
 import Data.Text.Short (ShortText)
 import Data.Text.Short qualified as TS
 
 
--- |Dependency on a pkgsrc package.
+-- |Dependency on a library provided by a pkgsrc package.
 data Dependency
   = KnownDependency
     { -- |The PKGPATH, such as @"math/hs-semigroupoids"@.
@@ -32,7 +31,7 @@ data Dependency
     , needsUnrestricting :: !Bool
     }
   | UnknownDependency
-    { -- |The name of Cabal package, such as @"semigroupoids"@. This
+    { -- |The name of a Cabal package, such as @"semigroupoids"@. This
       -- constructor is used when 'Cabal2Pkg.Extractor.summariseCabal'
       -- cannot find the corresponding package in pkgsrc or bundled
       -- libraries in GHC.
@@ -40,19 +39,6 @@ data Dependency
     }
   deriving Show
 
-instance ToJSON Dependency where
-  toJSON :: Dependency -> Value
-  toJSON dep
-    = case dep of
-        KnownDependency {..} ->
-          object [ "kind"               .= ("known" :: ShortText)
-                 , "pkgPath"            .= pkgPath
-                 , "needsUnrestricting" .= needsUnrestricting
-                 ]
-        UnknownDependency {..} ->
-          object [ "kind" .= ("unknown" :: ShortText)
-                 , "name" .= name
-                 ]
 
 -- |Return 'Nothing' if the dependency is bundled with the compiler.
 extractDependency :: C.Dependency -> CLI (Maybe Dependency)

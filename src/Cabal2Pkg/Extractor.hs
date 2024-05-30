@@ -1,4 +1,3 @@
-{-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE OverloadedStrings #-}
 module Cabal2Pkg.Extractor
   ( PackageMeta(..)
@@ -9,7 +8,6 @@ import Cabal2Pkg.CmdLine (CLI)
 import Cabal2Pkg.CmdLine qualified as CLI
 import Cabal2Pkg.Extractor.Component (ComponentMeta, extractComponents)
 import Cabal2Pkg.Extractor.License (extractLicense)
-import Data.Aeson (ToJSON(..))
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -19,7 +17,6 @@ import Distribution.Types.GenericPackageDescription qualified as GPD
 import Distribution.Types.PackageDescription (PackageDescription)
 import Distribution.Types.PackageDescription qualified as PD
 import Distribution.Utils.ShortText (fromShortText)
-import GHC.Generics (Generic, Generically(..))
 
 
 data PackageMeta = PackageMeta
@@ -30,8 +27,7 @@ data PackageMeta = PackageMeta
   , license    :: !Text
   , components :: ![ComponentMeta]
   }
-  deriving (Generic, Show)
-  deriving ToJSON via Generically PackageMeta
+  deriving Show
 
 
 summariseCabal :: GenericPackageDescription -> CLI PackageMeta

@@ -1,5 +1,4 @@
 {-# LANGUAGE DisambiguateRecordFields #-}
-{-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE OverloadedStrings #-}
 module Cabal2Pkg.Extractor.Component
   ( ComponentMeta(..)
@@ -12,7 +11,6 @@ import Cabal2Pkg.Extractor.Conditional
   ( Environment(..), CondBlock, extractCondBlock )
 import Cabal2Pkg.Extractor.Dependency (Dependency, extractDependency)
 import Control.Monad (unless)
-import Data.Aeson (ToJSON(..), Value)
 import Data.Foldable (foldl')
 import Data.Map.Strict qualified as M
 import Data.Set qualified as S
@@ -31,7 +29,6 @@ import Distribution.Types.LibraryName qualified as C
 import Distribution.Types.PackageDescription qualified as C
 import Distribution.Types.PackageId qualified as C
 import Distribution.Types.UnqualComponentName qualified as C
-import GHC.Generics (Generic, Generically(..))
 import UnliftIO.Async (mapConcurrently)
 
 
@@ -40,19 +37,12 @@ data ComponentMeta = ComponentMeta
   , name         :: !Text
   , dependencies :: !(CondBlock [Dependency])
   }
-  deriving (Generic, Show)
-  deriving ToJSON via Generically ComponentMeta
-
+  deriving Show
 
 data ComponentType
   = Library
   | Executable
   deriving Show
-
-instance ToJSON ComponentType where
-  toJSON :: ComponentType -> Value
-  toJSON Library    = toJSON @Text "lib"
-  toJSON Executable = toJSON @Text "exe"
 
 
 extractComponents :: GenericPackageDescription -> CLI [ComponentMeta]

@@ -12,8 +12,6 @@ maintainer:         pho@cielonegro.org
 category:           Distribution
 build-type:         Simple
 extra-doc-files:    CHANGELOG.md
-extra-source-files:
-    templates/*.ede
 
 flag rtsopts
     description: Build the executable with RTS options enabled.
@@ -40,6 +38,7 @@ executable cabal2pkg
         Cabal2Pkg.Extractor.Component
         Cabal2Pkg.Extractor.Conditional
         Cabal2Pkg.Extractor.Dependency
+        Cabal2Pkg.Extractor.ExeDependency
         Cabal2Pkg.Extractor.License
         Cabal2Pkg.Static
         Cabal2Pkg.Utils
@@ -50,7 +49,6 @@ executable cabal2pkg
     build-depends:
         Cabal                ^>= 3.10.2
       , Cabal-syntax         ^>= 3.10.2
-      , aeson                ^>= 2.2.1
       , base                  == 4.*
       , bytestring           ^>= 0.12.1
       , case-insensitive     ^>= 1.2.1
@@ -58,9 +56,7 @@ executable cabal2pkg
       , conduit-extra        ^>= 1.3.6
       , containers           ^>= 0.6.8
       , directory            ^>= 1.3.8
-      , ede                  ^>= 0.3.3
       , exceptions           ^>= 0.10.7
-      , file-embed           ^>= 0.0.16
       , filepath              >= 1.4
       , ghc-paths            ^>= 0.1
       , optparse-applicative ^>= 0.18.1
