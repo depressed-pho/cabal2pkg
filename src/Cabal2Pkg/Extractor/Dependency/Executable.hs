@@ -30,15 +30,27 @@ data ExeDep
   deriving (Eq, Generic, Hashable, Show)
 
 
-extractExeDep :: C.ExeDependency -> CLI ExeDep
+-- |Return 'Nothing' if the dependency is bundled with the compiler.
+extractExeDep :: C.ExeDependency -> CLI (Maybe ExeDep)
 extractExeDep (C.ExeDependency pkgName _ _)
-  = do m <- findPkgsrcPkg pkgName
-       case m of
-         Just name ->
-           pure . KnownExe $ name
-         Nothing ->
-           pure . UnknownExe . TS.fromString . C.unPackageName $ pkgName
+  | isBuiltin pkgName = pure Nothing
+  | otherwise =
+      do m <- findPkgsrcPkg pkgName
+         case m of
+           Just name ->
+             pure . Just . KnownExe $ name
+           Nothing ->
+             pure . Just . UnknownExe . TS.fromString . C.unPackageName $ pkgName
 
+isBuiltin :: C.PackageName -> Bool
+isBuiltin = flip elem builtins
+  where
+    -- I hate hard-coding these but tools aren't registered to the package
+    -- database so there's no other options.
+    builtins :: [C.PackageName]
+    builtins = [ "haddock"
+               , "hsc2hs"
+               ]
 
 -- |Search for a pkgsrc package case-insensitively, both with and without
 -- the @hs-@ prefix. Whether it includes @mk/haskell.mk@ or not is

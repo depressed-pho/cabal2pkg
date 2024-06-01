@@ -39,6 +39,7 @@ executable cabal2pkg
         Cabal2Pkg.Extractor.Conditional
         Cabal2Pkg.Extractor.Dependency
         Cabal2Pkg.Extractor.Dependency.Executable
+        Cabal2Pkg.Extractor.Dependency.ExternalLib
         Cabal2Pkg.Extractor.Dependency.Library
         Cabal2Pkg.Extractor.Dependency.PkgConfig
         Cabal2Pkg.Extractor.License

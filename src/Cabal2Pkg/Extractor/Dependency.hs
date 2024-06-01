@@ -7,6 +7,7 @@ module Cabal2Pkg.Extractor.Dependency
 
 import Cabal2Pkg.CmdLine (CLI)
 import Cabal2Pkg.Extractor.Dependency.Executable (ExeDep, extractExeDep)
+import Cabal2Pkg.Extractor.Dependency.ExternalLib (ExtLibDep, extractExtLibDep)
 import Cabal2Pkg.Extractor.Dependency.Library (LibDep, extractLibDep)
 import Cabal2Pkg.Extractor.Dependency.PkgConfig (PkgConfDep, extractPkgConfDep)
 import Data.HashSet (HashSet)
@@ -25,6 +26,7 @@ import UnliftIO.Async (Conc, conc, runConc)
 data DepSet
   = DepSet
     { exeDeps     :: !(HashSet ExeDep)
+    , extLibDeps  :: !(HashSet ExtLibDep)
     , libDeps     :: !(HashSet LibDep)
     , pkgConfDeps :: !(HashSet PkgConfDep)
     }
@@ -33,19 +35,22 @@ data DepSet
 
 extractDeps :: C.PackageDescription -> C.BuildInfo -> CLI DepSet
 extractDeps pkg bi@(C.BuildInfo {..})
-  = runConc $ DepSet <$> execs <*> libs <*> pkgConfLibs
+  = runConc $ DepSet <$> execs <*> extLibs <*> libs <*> pkgConfLibs
   where
     execs :: Conc CLI (HashSet ExeDep)
-    execs = HS.fromList
+    execs = HS.fromList . catMaybes
             <$> traverse (conc . extractExeDep)
                 [ dep
                 | dep <- BTD.getAllToolDependencies pkg bi
                 , not (BTD.isInternal pkg dep)
                 ]
 
+    extLibs :: Conc CLI (HashSet ExtLibDep)
+    extLibs = pure . HS.fromList . (extractExtLibDep <$>) $ extraLibs
+
     libs :: Conc CLI (HashSet LibDep)
     libs = HS.fromList . catMaybes
            <$> traverse (conc . extractLibDep) targetBuildDepends
 
     pkgConfLibs :: Conc CLI (HashSet PkgConfDep)
-    pkgConfLibs = pure . HS.fromList . (extractPkgConfDep <$>) $  pkgconfigDepends
+    pkgConfLibs = pure . HS.fromList . (extractPkgConfDep <$>) $ pkgconfigDepends
