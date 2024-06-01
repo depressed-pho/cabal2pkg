@@ -26,8 +26,8 @@ data DepSet
     { exeDeps :: !(HashSet ExeDep)
     , libDeps :: !(HashSet LibDep)
     }
-  deriving (Generic, Show)
-  deriving Semigroup via Generically DepSet
+  deriving (Eq, Generic, Show)
+  deriving (Monoid, Semigroup) via Generically DepSet
 
 extractDeps :: C.PackageDescription -> C.BuildInfo -> CLI DepSet
 extractDeps pkg bi@(C.BuildInfo {..})

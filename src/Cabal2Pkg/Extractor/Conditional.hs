@@ -25,8 +25,11 @@ import Distribution.Types.VersionRange (VersionRange, withinRange)
 import GHC.Generics (Generic, Generically(..))
 import GHC.Stack (HasCallStack)
 
-class Simplify a where
+class Simplifiable a where
   simplify :: a -> a
+
+class GarbageCollectable a where
+  garbageCollect :: a -> a
 
 data Environment = Environment
   { flags      :: !FlagMap
@@ -38,15 +41,15 @@ data CondBlock a = CondBlock
   { always    :: !a
   , branches  :: ![CondBranch a]
   }
-  deriving (Generic, Show)
-  deriving Semigroup via Generically (CondBlock a)
+  deriving (Eq, Generic, Show)
+  deriving (Monoid, Semigroup) via Generically (CondBlock a)
 
 data CondBranch a = CondBranch
   { condition  :: !Condition
   , ifTrue     :: !(CondBlock a)
   , ifFalse    :: !(Maybe (CondBlock a))
   }
-  deriving (Generic, Show)
+  deriving (Eq, Generic, Show)
 
 -- |An intermediate data type for Cabal conditions.
 data Condition
@@ -58,7 +61,7 @@ data Condition
     { expression :: !Text
     , needsPrefs :: !Bool
     }
-  deriving Show
+  deriving (Eq, Show)
 
 
 -- |Conditionals in the Cabal AST is fucking irritatingly
@@ -67,7 +70,12 @@ data Condition
 -- contained in @condTreeData :: a@? To confuse people trying to work with
 -- the fucking AST?
 extractCondBlock :: forall m a a' _c c' .
-                    (HasCallStack, MonadUnliftIO m, Semigroup (m c'))
+                    ( HasCallStack
+                    , MonadUnliftIO m
+                    , Semigroup (m c')
+                    , Monoid c'
+                    , Eq c'
+                    )
                  => (a -> m c')
                  -> (a -> CondBlock c' -> m a')
                  -> Environment
@@ -77,7 +85,7 @@ extractCondBlock extractContent extractOuter env = go
   where
     go :: HasCallStack => C.CondTree C.ConfVar _c a -> m a'
     go tree
-      = do block <- forceBlock . simplify $ mkBlock tree
+      = do block <- (garbageCollect <$>) . forceBlock . simplify $ mkBlock tree
            extractOuter (C.condTreeData tree) block
 
     forceBlock :: HasCallStack => CondBlock (m c') -> m (CondBlock c')
@@ -214,9 +222,9 @@ extractArchCond arch
 -- to a constant. If it folds to 'True' merge its 'ifTrue' back to the
 -- parent node and discard its 'ifFalse'. If it folds to 'False' we do the
 -- opposite. This means @'CondBlock' a@ has to form a semigroup.
-instance Semigroup a => Simplify (CondBlock a) where
+instance Semigroup a => Simplifiable (CondBlock a) where
   simplify block
-    = foldl' go (CondBlock (always block) []) (branches block)
+    = foldl' go (block { branches = [] }) (branches block)
     where
       go :: CondBlock a -> CondBranch a -> CondBlock a
       go bl br
@@ -226,7 +234,11 @@ instance Semigroup a => Simplify (CondBlock a) where
                Literal False -> maybe bl (bl <>) (ifFalse br')
                _             -> bl { branches = branches bl <> [br'] }
 
-instance Semigroup a => Simplify (CondBranch a) where
+instance (Eq a, Monoid a) => GarbageCollectable (CondBlock a) where
+  garbageCollect block
+    = simplify $ block { branches = garbageCollect <$> branches block }
+
+instance Semigroup a => Simplifiable (CondBranch a) where
   simplify (CondBranch {..})
     = CondBranch
       { condition = simplify condition
@@ -234,7 +246,29 @@ instance Semigroup a => Simplify (CondBranch a) where
       , ifFalse   = simplify <$> ifFalse
       }
 
-instance Simplify Condition where
+-- |If the 'ifTrue' branch and the 'ifFalse' branch are both empty, the
+-- 'condition' becomes irrelevant so we can turn it into a constant. This
+-- means @'CondBlock' a@ has to form a monoid and has to be
+-- equality-comparable while doing the garbage-collection.
+--
+-- Why do we have separate type classes for 'simplify' and
+-- 'garbageCollect'? Because the latter can only be done after forcing
+-- deferred monadic computations. We can not test if @'Monad' m => m a@ is
+-- empty just because @a@ is 'Eq' and 'Monoid', without forcing the
+-- computation.
+instance (Eq a, Monoid a) => GarbageCollectable (CondBranch a) where
+  garbageCollect (CondBranch {..})
+    = let c = condition
+          t = garbageCollect ifTrue
+          f = garbageCollect <$> ifFalse
+      in
+        -- These comparisons regarding Maybe aren't beautiful. Can we do
+        -- anything better?
+        if t == mempty && (f == Nothing || f == Just mempty)
+        then CondBranch (Literal False) t f
+        else CondBranch c t f
+
+instance Simplifiable Condition where
   simplify c@(Literal _) = c
 
   simplify (Not c)
