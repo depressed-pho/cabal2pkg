@@ -40,6 +40,7 @@ executable cabal2pkg
         Cabal2Pkg.Extractor.Dependency
         Cabal2Pkg.Extractor.Dependency.Executable
         Cabal2Pkg.Extractor.Dependency.Library
+        Cabal2Pkg.Extractor.Dependency.PkgConfig
         Cabal2Pkg.Extractor.License
         Cabal2Pkg.Static
         Cabal2Pkg.Utils

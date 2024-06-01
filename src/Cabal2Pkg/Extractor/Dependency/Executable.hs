@@ -7,11 +7,11 @@ module Cabal2Pkg.Extractor.Dependency.Executable
 
 import Cabal2Pkg.CmdLine (CLI, srcDb)
 import Data.Hashable (Hashable(..))
+import Data.Text.Short (ShortText)
+import Data.Text.Short qualified as TS
 import Database.Pkgsrc.SrcDb qualified as SrcDb
 import Distribution.Types.ExeDependency qualified as C
 import Distribution.Types.PackageName qualified as C
-import Data.Text.Short (ShortText)
-import Data.Text.Short qualified as TS
 import GHC.Generics (Generic)
 
 

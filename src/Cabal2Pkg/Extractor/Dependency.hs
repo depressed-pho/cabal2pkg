@@ -8,6 +8,7 @@ module Cabal2Pkg.Extractor.Dependency
 import Cabal2Pkg.CmdLine (CLI)
 import Cabal2Pkg.Extractor.Dependency.Executable (ExeDep, extractExeDep)
 import Cabal2Pkg.Extractor.Dependency.Library (LibDep, extractLibDep)
+import Cabal2Pkg.Extractor.Dependency.PkgConfig (PkgConfDep, extractPkgConfDep)
 import Data.HashSet (HashSet)
 import Data.HashSet qualified as HS
 import Data.Maybe (catMaybes)
@@ -23,15 +24,16 @@ import UnliftIO.Async (Conc, conc, runConc)
 -- library dependencies.
 data DepSet
   = DepSet
-    { exeDeps :: !(HashSet ExeDep)
-    , libDeps :: !(HashSet LibDep)
+    { exeDeps     :: !(HashSet ExeDep)
+    , libDeps     :: !(HashSet LibDep)
+    , pkgConfDeps :: !(HashSet PkgConfDep)
     }
   deriving (Eq, Generic, Show)
   deriving (Monoid, Semigroup) via Generically DepSet
 
 extractDeps :: C.PackageDescription -> C.BuildInfo -> CLI DepSet
 extractDeps pkg bi@(C.BuildInfo {..})
-  = runConc $ DepSet <$> execs <*> libs
+  = runConc $ DepSet <$> execs <*> libs <*> pkgConfLibs
   where
     execs :: Conc CLI (HashSet ExeDep)
     execs = HS.fromList
@@ -44,3 +46,6 @@ extractDeps pkg bi@(C.BuildInfo {..})
     libs :: Conc CLI (HashSet LibDep)
     libs = HS.fromList . catMaybes
            <$> traverse (conc . extractLibDep) targetBuildDepends
+
+    pkgConfLibs :: Conc CLI (HashSet PkgConfDep)
+    pkgConfLibs = pure . HS.fromList . (extractPkgConfDep <$>) $  pkgconfigDepends
