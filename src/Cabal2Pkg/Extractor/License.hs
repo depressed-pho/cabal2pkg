@@ -129,7 +129,7 @@ spdxLicense (SL.License expr) = fmtExpr expr
         SL.GPL_1_0_only      -> "gnu-gpl-v1"
         SL.GPL_1_0_or_later  -> "gnu-gpl-v1 OR gnu-gpl-v2 OR gnu-gpl-v3"
         SL.GPL_2_0_only      -> "gnu-gpl-v2"
-        SL.GPL_2_0_or_later  -> "gnu-gpl-v2 OR gnu-gpl-v2"
+        SL.GPL_2_0_or_later  -> "gnu-gpl-v2 OR gnu-gpl-v3"
         SL.GPL_3_0_only      -> "gnu-gpl-v3"
         SL.GPL_3_0_or_later  -> "gnu-gpl-v3"
         SL.HPND              -> "hpnd"

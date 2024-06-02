@@ -1,4 +1,3 @@
-{-# LANGUAGE DeriveAnyClass #-} -- for deriving Hashable
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 module Cabal2Pkg.Extractor.Dependency.PkgConfig
@@ -6,12 +5,10 @@ module Cabal2Pkg.Extractor.Dependency.PkgConfig
   , extractPkgConfDep
   ) where
 
-import Data.Hashable (Hashable(..))
 import Data.Text.Short (ShortText)
 import Data.Text.Short qualified as TS
 import Distribution.Types.PkgconfigDependency qualified as C
 import Distribution.Types.PkgconfigName qualified as C
-import GHC.Generics (Generic)
 
 
 -- |Dependency on an external pkg-config library. In pkgsrc we declare
@@ -22,7 +19,7 @@ data PkgConfDep
     { -- |The name of a pkg-config package, such as @"cups"@.
       name :: !ShortText
     }
-  deriving (Eq, Generic, Hashable, Show)
+  deriving (Eq, Show)
 
 
 extractPkgConfDep :: C.PkgconfigDependency -> PkgConfDep

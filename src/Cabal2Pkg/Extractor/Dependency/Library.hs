@@ -1,4 +1,3 @@
-{-# LANGUAGE DeriveAnyClass #-} -- for deriving Hashable
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 module Cabal2Pkg.Extractor.Dependency.Library
@@ -8,7 +7,6 @@ module Cabal2Pkg.Extractor.Dependency.Library
 
 import Cabal2Pkg.CmdLine (CLI, installedPkgs, srcDb)
 import Control.Monad (join)
-import Data.Hashable (Hashable(..))
 import Database.Pkgsrc.SrcDb (Package)
 import Database.Pkgsrc.SrcDb qualified as SrcDb
 import Distribution.Parsec (eitherParsec)
@@ -21,7 +19,6 @@ import Distribution.Types.VersionRange qualified as C
 import Data.List (isSuffixOf)
 import Data.Text.Short (ShortText)
 import Data.Text.Short qualified as TS
-import GHC.Generics (Generic)
 
 
 -- |Dependency on a library provided by a pkgsrc package.
@@ -40,7 +37,7 @@ data LibDep
       -- libraries in GHC.
       name :: !ShortText
     }
-  deriving (Eq, Generic, Hashable, Show)
+  deriving (Eq, Show)
 
 
 -- |Return 'Nothing' if the dependency is bundled with the compiler.

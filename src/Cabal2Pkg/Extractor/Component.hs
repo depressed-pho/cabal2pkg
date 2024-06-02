@@ -1,5 +1,6 @@
 {-# LANGUAGE DisambiguateRecordFields #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards #-}
 module Cabal2Pkg.Extractor.Component
   ( ComponentMeta(..)
   , extractComponents
@@ -20,6 +21,8 @@ import Data.Text qualified as T
 import Distribution.Pretty (prettyShow)
 import Distribution.Types.CondTree qualified as C
 import Distribution.Types.ConfVar qualified as C
+import Distribution.Types.Executable qualified as C
+import Distribution.Types.ForeignLib qualified as C
 import Distribution.Types.Flag qualified as C
 import Distribution.Types.GenericPackageDescription (GenericPackageDescription)
 import Distribution.Types.GenericPackageDescription qualified as GPD
@@ -39,17 +42,23 @@ data ComponentMeta = ComponentMeta
 
 data ComponentType
   = Library
+  | ForeignLib
   | Executable
   deriving Show
 
 
 extractComponents :: GenericPackageDescription -> CLI [ComponentMeta]
 extractComponents gpd
-  = do env  <- extractEnv
-       lib  <- traverse (extractLib env) (GPD.condLibrary gpd)
-       -- FIXME: also executables
-       pure $ concat [ maybeToList lib
-                     ]
+  = do env     <- extractEnv
+       lib     <- traverse (extractLib    env) (GPD.condLibrary gpd)
+       subLibs <- traverse (extractLib    env) (snd <$> GPD.condSubLibraries gpd)
+       frnLibs <- traverse (extractFrnLib env) (snd <$> GPD.condForeignLibs  gpd)
+       execs   <- traverse (extractExe    env) (snd <$> GPD.condExecutables  gpd)
+       pure . filter (not . isEmpty) $ concat [ maybeToList lib
+                                              , subLibs
+                                              , frnLibs
+                                              , execs
+                                              ]
   where
     extractEnv :: CLI Environment
     extractEnv
@@ -64,6 +73,9 @@ extractComponents gpd
     pd :: C.PackageDescription
     pd = GPD.packageDescription gpd
 
+    isEmpty :: ComponentMeta -> Bool
+    isEmpty (ComponentMeta {..}) = deps == mempty
+
     extractLib :: Environment -> C.CondTree C.ConfVar c C.Library -> CLI ComponentMeta
     extractLib = extractCondBlock extractContent extractOuter
       where
@@ -77,6 +89,34 @@ extractComponents gpd
             , name  = case C.libName lib of
                         C.LMainLibName  -> T.pack . prettyShow . C.pkgName . C.package $ pd
                         C.LSubLibName n -> T.pack $ C.unUnqualComponentName n
+            , deps  = deps
+            }
+
+    extractFrnLib :: Environment -> C.CondTree C.ConfVar c C.ForeignLib -> CLI ComponentMeta
+    extractFrnLib = extractCondBlock extractContent extractOuter
+      where
+        extractContent :: C.ForeignLib -> CLI DepSet
+        extractContent = extractDeps pd . C.foreignLibBuildInfo
+
+        extractOuter :: Applicative f => C.ForeignLib -> CondBlock DepSet -> f ComponentMeta
+        extractOuter frnLib deps
+          = pure ComponentMeta
+            { type_ = ForeignLib
+            , name  = T.pack . C.unUnqualComponentName $ C.foreignLibName frnLib
+            , deps  = deps
+            }
+
+    extractExe :: Environment -> C.CondTree C.ConfVar c C.Executable -> CLI ComponentMeta
+    extractExe = extractCondBlock extractContent extractOuter
+      where
+        extractContent :: C.Executable -> CLI DepSet
+        extractContent = extractDeps pd . C.buildInfo
+
+        extractOuter :: Applicative f => C.Executable -> CondBlock DepSet -> f ComponentMeta
+        extractOuter exe deps
+          = pure ComponentMeta
+            { type_ = Executable
+            , name  = T.pack . C.unUnqualComponentName $ C.exeName exe
             , deps  = deps
             }
 

@@ -1,4 +1,3 @@
-{-# LANGUAGE DeriveAnyClass #-} -- for deriving Hashable
 {-# LANGUAGE OverloadedStrings #-}
 module Cabal2Pkg.Extractor.Dependency.Executable
   ( ExeDep(..)
@@ -6,13 +5,11 @@ module Cabal2Pkg.Extractor.Dependency.Executable
   ) where
 
 import Cabal2Pkg.CmdLine (CLI, srcDb)
-import Data.Hashable (Hashable(..))
 import Data.Text.Short (ShortText)
 import Data.Text.Short qualified as TS
 import Database.Pkgsrc.SrcDb qualified as SrcDb
 import Distribution.Types.ExeDependency qualified as C
 import Distribution.Types.PackageName qualified as C
-import GHC.Generics (Generic)
 
 
 -- |Dependency on a tool provided by a pkgsrc package.
@@ -27,7 +24,7 @@ data ExeDep
       -- corresponding package in pkgsrc.
       name :: !ShortText
     }
-  deriving (Eq, Generic, Hashable, Show)
+  deriving (Eq, Show)
 
 
 -- |Return 'Nothing' if the dependency is bundled with the compiler.
