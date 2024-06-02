@@ -5,8 +5,8 @@ module Cabal2Pkg.Extractor.Dependency.Executable
   ) where
 
 import Cabal2Pkg.CmdLine (CLI, srcDb)
-import Data.Text.Short (ShortText)
-import Data.Text.Short qualified as TS
+import Data.Text (Text)
+import Data.Text qualified as T
 import Database.Pkgsrc.SrcDb qualified as SrcDb
 import Distribution.Types.ExeDependency qualified as C
 import Distribution.Types.PackageName qualified as C
@@ -16,13 +16,13 @@ import Distribution.Types.PackageName qualified as C
 data ExeDep
   = KnownExe
     { -- |The name of the tool to be listed in @USE_TOOLS@.
-      name :: !ShortText
+      name :: !Text
     }
   | UnknownExe
     { -- |The name of a Cabal package, such as @"alex"@. This constructor
       -- is used when 'Cabal2Pkg.Extractor.summariseCabal' cannot find the
       -- corresponding package in pkgsrc.
-      name :: !ShortText
+      name :: !Text
     }
   deriving (Eq, Show)
 
@@ -37,7 +37,7 @@ extractExeDep (C.ExeDependency pkgName _ _)
            Just name ->
              pure . Just . KnownExe $ name
            Nothing ->
-             pure . Just . UnknownExe . TS.fromString . C.unPackageName $ pkgName
+             pure . Just . UnknownExe . T.pack . C.unPackageName $ pkgName
 
 isBuiltin :: C.PackageName -> Bool
 isBuiltin = flip elem builtins
@@ -53,7 +53,7 @@ isBuiltin = flip elem builtins
 -- the @hs-@ prefix. Whether it includes @mk/haskell.mk@ or not is
 -- irrelevant because we don't care in what language it's implemented. The
 -- function returns the name of the tool to be listed in @USE_TOOLS@.
-findPkgsrcPkg :: C.PackageName -> CLI (Maybe ShortText)
+findPkgsrcPkg :: C.PackageName -> CLI (Maybe Text)
 findPkgsrcPkg name
   = do db <- srcDb
        -- Would it be beneficial to perform these two searches
@@ -67,5 +67,5 @@ findPkgsrcPkg name
            do p1 <- SrcDb.findPackageCI db ("hs-" <> name')
               pure $ const name' <$> p1
   where
-    name' :: ShortText
-    name' = TS.fromString . C.unPackageName $ name
+    name' :: Text
+    name' = T.pack . C.unPackageName $ name

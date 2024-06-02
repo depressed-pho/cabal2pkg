@@ -1,12 +1,10 @@
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards #-}
 module Cabal2Pkg.Extractor.Dependency.ExternalLib
   ( ExtLibDep(..)
   , extractExtLibDep
   ) where
 
-import Data.Text.Short (ShortText)
-import Data.Text.Short qualified as TS
+import Data.Text (Text)
+import Data.Text qualified as T
 
 
 -- |Dependency on a non-Haskell library. In pkgsrc we declare these
@@ -15,10 +13,10 @@ import Data.Text.Short qualified as TS
 data ExtLibDep
   = ExtLibDep
     { -- |The name of an external library, such as @"z"@ for @libz@.
-      name :: !ShortText
+      name :: !Text
     }
   deriving (Eq, Show)
 
 
 extractExtLibDep :: String -> ExtLibDep
-extractExtLibDep = ExtLibDep . TS.fromString
+extractExtLibDep = ExtLibDep . T.pack

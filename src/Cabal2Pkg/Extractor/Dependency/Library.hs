@@ -17,15 +17,15 @@ import Distribution.Types.PackageName qualified as C
 import Distribution.Types.Version (Version)
 import Distribution.Types.VersionRange qualified as C
 import Data.List (isSuffixOf)
-import Data.Text.Short (ShortText)
-import Data.Text.Short qualified as TS
+import Data.Text (Text)
+import Data.Text qualified as T
 
 
 -- |Dependency on a library provided by a pkgsrc package.
 data LibDep
   = KnownLib
     { -- |The PKGPATH, such as @"math/hs-semigroupoids"@.
-      pkgPath :: !ShortText
+      pkgPath :: !Text
       -- |Whether the package needs to be listed in
       -- @HASKELL_UNRESTRICT_DEPENDENCIES@.
     , needsUnrestricting :: !Bool
@@ -35,7 +35,7 @@ data LibDep
       -- constructor is used when 'Cabal2Pkg.Extractor.summariseCabal'
       -- cannot find the corresponding package in pkgsrc or bundled
       -- libraries in GHC.
-      name :: !ShortText
+      name :: !Text
     }
   deriving (Eq, Show)
 
@@ -53,7 +53,7 @@ extractLibDep dep
                    Nothing ->
                      pure . Just $ notFound
   where
-    found :: ShortText -> Version -> LibDep
+    found :: Text -> Version -> LibDep
     found path ver
       = KnownLib
         { pkgPath            = path
@@ -63,7 +63,7 @@ extractLibDep dep
     notFound :: LibDep
     notFound
       = UnknownLib
-        { name = TS.fromString . C.unPackageName . C.depPkgName $ dep
+        { name = T.pack . C.unPackageName . C.depPkgName $ dep
         }
 
 isBuiltin :: C.InstalledPackageIndex -> C.PackageName -> Bool
@@ -84,7 +84,7 @@ isBuiltin ipi name
 -- the @hs-@ prefix. Only packages that include @mk/haskell.mk@ are
 -- returned. The function returns a pair of its @PKGPATH@ and
 -- @PKGVERSION_NOREV@.
-findPkgsrcPkg :: C.PackageName -> CLI (Maybe (ShortText, Version))
+findPkgsrcPkg :: C.PackageName -> CLI (Maybe (Text, Version))
 findPkgsrcPkg name
   = do db <- srcDb
        -- Would it be beneficial to perform these two searches
@@ -98,10 +98,10 @@ findPkgsrcPkg name
            do p1 <- SrcDb.findPackageCI db name'
               join <$> traverse found p1
   where
-    name' :: ShortText
-    name' = TS.fromString . C.unPackageName $ name
+    name' :: Text
+    name' = T.pack . C.unPackageName $ name
 
-    found :: Package CLI -> CLI (Maybe (ShortText, Version))
+    found :: Package CLI -> CLI (Maybe (Text, Version))
     found pkg
       = do hask <- SrcDb.includesHaskellMk pkg
            if hask
@@ -109,5 +109,5 @@ findPkgsrcPkg name
                      pure $ Just (SrcDb.pkgPath pkg, ver)
              else pure Nothing
 
-    toCabalVer :: MonadFail m => ShortText -> m Version
-    toCabalVer = either fail pure . eitherParsec . TS.toString
+    toCabalVer :: MonadFail m => Text -> m Version
+    toCabalVer = either fail pure . eitherParsec . T.unpack

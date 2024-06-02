@@ -46,7 +46,6 @@ executable cabal2pkg
         Cabal2Pkg.Static
         Cabal2Pkg.Utils
         Control.Concurrent.Deferred
-        Data.Text.Short.Orphans
         Database.Pkgsrc.SrcDb
 
     build-depends:
@@ -71,7 +70,6 @@ executable cabal2pkg
       , tar-conduit          ^>= 0.4.1
       , template-haskell      >= 2.21
       , text                 ^>= 2.1.1
-      , text-short           ^>= 0.1.5
       , transformers         ^>= 0.6.1
       , typed-process        ^>= 0.2.11
       , unliftio             ^>= 0.2.25

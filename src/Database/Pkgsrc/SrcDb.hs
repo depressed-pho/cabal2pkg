@@ -30,12 +30,10 @@ import Data.HashMap.Strict qualified as HM
 import Data.HashSet (HashSet)
 import Data.HashSet qualified as HS
 import Data.Maybe (catMaybes)
+import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as T
 import Data.Text.IO.Utf8 qualified as U8
-import Data.Text.Short (ShortText)
-import Data.Text.Short qualified as TS
-import Data.Text.Short.Orphans ()
 import System.Directory.OsPath
   ( doesDirectoryExist, doesFileExist, listDirectory )
 import System.IO (hClose)
@@ -47,22 +45,22 @@ import UnliftIO.Async (mapConcurrently)
 
 data SrcDb m
   = SrcDb
-    { categories :: !(HashMap ShortText (Deferred m (Category m)))
+    { categories :: !(HashMap Text (Deferred m (Category m)))
     }
 
 -- |A category of pkgsrc packages. It has nothing to do with category
 -- theory.
 data Category m
   = Category
-    { packages   :: !(HashMap     ShortText  (Deferred m (Package m)))
-    , packagesCI :: !(HashMap (CI ShortText) (Deferred m (Package m)))
+    { packages   :: !(HashMap     Text  (Deferred m (Package m)))
+    , packagesCI :: !(HashMap (CI Text) (Deferred m (Package m)))
     }
 
 data Package m
   = Package
-    { pPKGPATH           :: ShortText
-    , pPKGNAME           :: Deferred m ShortText
-    , pPKGVERSION_NOREV  :: Deferred m ShortText
+    { pPKGPATH           :: Text
+    , pPKGNAME           :: Deferred m Text
+    , pPKGVERSION_NOREV  :: Deferred m Text
     , pIncludesHaskellMk :: Deferred m Bool
     }
 
@@ -74,14 +72,14 @@ createSrcDb :: (MonadThrow m, MonadUnliftIO m)
             -> m (SrcDb m)
 createSrcDb makePath root = SrcDb <$> go
   where
-    go :: (MonadThrow m, MonadUnliftIO m) => m (HashMap ShortText (Deferred m (Category m)))
+    go :: (MonadThrow m, MonadUnliftIO m) => m (HashMap Text (Deferred m (Category m)))
     go = liftIO (listDirectory root)
          >>= filterCats root
          >>= (HM.fromList <$>) . mapM deferCat
 
-    deferCat :: (MonadThrow m, MonadUnliftIO m) => OsString -> m (ShortText, Deferred m (Category m))
+    deferCat :: (MonadThrow m, MonadUnliftIO m) => OsString -> m (Text, Deferred m (Category m))
     deferCat catName
-      = (,) <$> (TS.fromString <$> OP.decodeUtf catName)
+      = (,) <$> (T.pack <$> OP.decodeUtf catName)
             <*> (defer $ mkCat catName)
 
     mkCat :: (MonadThrow m, MonadUnliftIO m) => OsString -> m (Category m)
@@ -129,7 +127,7 @@ scanPkgs :: forall m.
          => OsPath
          -> OsPath
          -> OsPath
-         -> m (HashMap ShortText (Deferred m (Package m)))
+         -> m (HashMap Text (Deferred m (Package m)))
 scanPkgs makePath root catName
   = liftIO (listDirectory catPath)
     >>= filterPkgs catPath
@@ -138,15 +136,15 @@ scanPkgs makePath root catName
     catPath :: OsPath
     catPath = root </> catName
 
-    deferPkg :: OsString -> m (ShortText, Deferred m (Package m))
+    deferPkg :: OsString -> m (Text, Deferred m (Package m))
     deferPkg dirName
-      = (,) <$> (TS.fromString <$> OP.decodeUtf dirName)
+      = (,) <$> (T.pack <$> OP.decodeUtf dirName)
             <*> (defer $ mkPkg dirName)
 
     mkPkg :: OsString -> m (Package m)
     mkPkg dirName
       = do let dirPath = catPath </> dirName
-           pkgPathTS <- TS.fromString <$> OP.decodeUtf (catName </> dirName)
+           pkgPathTS <- T.pack <$> OP.decodeUtf (catName </> dirName)
            vars      <- defer $ getMakeVars dirPath [ "HASKELL_PKG_NAME"
                                                     , "PKGNAME"
                                                     , "PKGVERSION_NOREV"
@@ -161,8 +159,8 @@ scanPkgs makePath root catName
     -- |This is obviously the slowest part of cabal2pkg. Parallelise calls
     -- of it at all costs.
     getMakeVars :: OsPath
-                -> HashSet ShortText
-                -> m (HashMap ShortText ShortText)
+                -> HashSet Text
+                -> m (HashMap Text Text)
     getMakeVars dirPath vars
       = do make' <- OP.decodeUtf makePath
            dir'  <- OP.decodeUtf dirPath
@@ -178,13 +176,13 @@ scanPkgs makePath root catName
                 U8.hPutStrLn stdin "x:"
                 flip mapM_ vars' $ \var ->
                   do U8.hPutStr stdin "\t@printf '%s\\0' \"${"
-                     U8.hPutStr stdin $ TS.toText var
+                     U8.hPutStr stdin var
                      U8.hPutStrLn stdin "}\""
                 hClose stdin
 
                 out <- either throw pure . T.decodeUtf8' . BL.toStrict
                        =<< atomically (PT.getStdout p)
-                let vals = TS.fromText <$> T.split (== '\0') out
+                let vals = T.split (== '\0') out
                 pure . HM.fromList $ zip vars' vals
 
 -- |Only include directories that has a Makefile.
@@ -205,12 +203,12 @@ filterPkgs catPath = (catMaybes <$>) . mapConcurrently go
 -- |Search for a package that exactly matches with the given name. The
 -- search is performed against the name of directories but not against
 -- @PKGNAME@'s.
-findPackage :: MonadUnliftIO m => SrcDb m -> ShortText -> m (Maybe (Package m))
+findPackage :: MonadUnliftIO m => SrcDb m -> Text -> m (Maybe (Package m))
 findPackage db name
   = findPackageCommon db (HM.lookup name . packages)
 
 -- |A variant of 'findPackage' but performs search case-insensitively.
-findPackageCI :: MonadUnliftIO m => SrcDb m -> ShortText -> m (Maybe (Package m))
+findPackageCI :: MonadUnliftIO m => SrcDb m -> Text -> m (Maybe (Package m))
 findPackageCI db name
   = findPackageCommon db (HM.lookup (CI.mk name) . packagesCI)
 
@@ -225,13 +223,13 @@ findPackageCommon (SrcDb {..}) q
     go :: Category m -> m (Maybe (Package m))
     go = traverse force . q
 
-pkgPath :: Package m -> ShortText
+pkgPath :: Package m -> Text
 pkgPath = pPKGPATH
 
-pkgName :: MonadUnliftIO m => Package m -> m ShortText
+pkgName :: MonadUnliftIO m => Package m -> m Text
 pkgName = force . pPKGNAME
 
-pkgVersionNoRev :: MonadUnliftIO m => Package m -> m ShortText
+pkgVersionNoRev :: MonadUnliftIO m => Package m -> m Text
 pkgVersionNoRev = force . pPKGVERSION_NOREV
 
 includesHaskellMk :: MonadUnliftIO m => Package m -> m Bool

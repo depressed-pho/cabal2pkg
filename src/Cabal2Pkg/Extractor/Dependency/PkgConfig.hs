@@ -1,12 +1,10 @@
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards #-}
 module Cabal2Pkg.Extractor.Dependency.PkgConfig
   ( PkgConfDep(..)
   , extractPkgConfDep
   ) where
 
-import Data.Text.Short (ShortText)
-import Data.Text.Short qualified as TS
+import Data.Text (Text)
+import Data.Text qualified as T
 import Distribution.Types.PkgconfigDependency qualified as C
 import Distribution.Types.PkgconfigName qualified as C
 
@@ -17,11 +15,11 @@ import Distribution.Types.PkgconfigName qualified as C
 data PkgConfDep
   = PkgConfDep
     { -- |The name of a pkg-config package, such as @"cups"@.
-      name :: !ShortText
+      name :: !Text
     }
   deriving (Eq, Show)
 
 
 extractPkgConfDep :: C.PkgconfigDependency -> PkgConfDep
 extractPkgConfDep (C.PkgconfigDependency pkgName _)
-  = PkgConfDep . TS.fromString . C.unPkgconfigName $ pkgName
+  = PkgConfDep . T.pack . C.unPkgconfigName $ pkgName
