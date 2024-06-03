@@ -21,9 +21,19 @@ import Data.Text (Text)
 import Data.Text qualified as T
 
 
--- |Dependency on a library provided by a pkgsrc package.
+-- |Dependency on a library provided by either the compiler or a pkgsrc
+-- package.
 data LibDep
-  = KnownLib
+  = BundledLib
+    { -- |The name of a Cabal package, such as @"base"@. This constructor
+      -- is used when 'Cabal2Pkg.Extractor.summariseCabal' finds that
+      -- the dependency is bundled with the compiler.
+      name :: !Text
+      -- |Whether the package needs to be listed in
+      -- @HASKELL_UNRESTRICT_DEPENDENCIES@.
+    , needsUnrestricting :: !Bool
+    }
+  | KnownLib
     { -- |The PKGPATH, such as @"math/hs-semigroupoids"@.
       pkgPath :: !Text
       -- |Whether the package needs to be listed in
@@ -40,19 +50,24 @@ data LibDep
   deriving (Eq, Show)
 
 
--- |Return 'Nothing' if the dependency is bundled with the compiler.
-extractLibDep :: C.Dependency -> CLI (Maybe LibDep)
+extractLibDep :: C.Dependency -> CLI LibDep
 extractLibDep dep
   = do ipi <- installedPkgs
-       if isBuiltin ipi (C.depPkgName dep)
-         then pure Nothing
-         else do m <- findPkgsrcPkg (C.depPkgName dep)
-                 case m of
-                   Just (path, ver) ->
-                     pure . Just $ found path ver
-                   Nothing ->
-                     pure . Just $ notFound
+       case lookupBundled ipi (C.depPkgName dep) of
+         Just ver -> pure $ bundled ver
+         Nothing  ->
+           do m <- findPkgsrcPkg (C.depPkgName dep)
+              case m of
+                Just (path, ver) -> pure $ found path ver
+                Nothing          -> pure $ notFound
   where
+    bundled :: Version -> LibDep
+    bundled ver
+      = BundledLib
+        { name               = T.pack . C.unPackageName . C.depPkgName $ dep
+        , needsUnrestricting = not $ C.withinRange ver (C.depVerRange dep)
+        }
+
     found :: Text -> Version -> LibDep
     found path ver
       = KnownLib
@@ -66,19 +81,22 @@ extractLibDep dep
         { name = T.pack . C.unPackageName . C.depPkgName $ dep
         }
 
-isBuiltin :: C.InstalledPackageIndex -> C.PackageName -> Bool
-isBuiltin ipi name
+lookupBundled :: C.InstalledPackageIndex -> C.PackageName -> Maybe Version
+lookupBundled ipi name
   = case C.lookupPackageName ipi name of
-      ((_, (pkg:_)):_) ->
+      ((ver, (pkg:_)):_) ->
         -- NOTE: The package database does not have explicit fields
         -- indicating whether the package is bundled with the compiler. For
         -- now we consider packages whose "hs-libraries" field ends with
         -- "-inplace" to be bundled ones, but this is a fragile test.
         case C.hsLibraries pkg of
-          (lib:_) -> "-inplace" `isSuffixOf` lib
-          _       -> False
+          (lib:_)
+            | "-inplace" `isSuffixOf` lib ->
+                Just ver
+          _ ->
+            Nothing
       _ ->
-        False
+        Nothing
 
 -- |Search for a pkgsrc package case-insensitively, both with and without
 -- the @hs-@ prefix. Only packages that include @mk/haskell.mk@ are

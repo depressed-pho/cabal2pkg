@@ -6,7 +6,7 @@ module Cabal2Pkg.Extractor
 
 import Cabal2Pkg.CmdLine (CLI)
 import Cabal2Pkg.CmdLine qualified as CLI
-import Cabal2Pkg.Extractor.Component (ComponentMeta, extractComponents)
+import Cabal2Pkg.Extractor.Component (ComponentMeta(..), extractComponents)
 import Cabal2Pkg.Extractor.License (extractLicense)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)

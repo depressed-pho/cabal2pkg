@@ -43,10 +43,12 @@ executable cabal2pkg
         Cabal2Pkg.Extractor.Dependency.Library
         Cabal2Pkg.Extractor.Dependency.PkgConfig
         Cabal2Pkg.Extractor.License
+        Cabal2Pkg.Generator.Makefile
         Cabal2Pkg.Static
         Cabal2Pkg.Utils
         Control.Concurrent.Deferred
         Database.Pkgsrc.SrcDb
+        Language.BMake.AST
 
     build-depends:
         Cabal                ^>= 3.10.2
@@ -61,6 +63,8 @@ executable cabal2pkg
       , exceptions           ^>= 0.10.7
       , filepath              >= 1.4
       , ghc-paths            ^>= 0.1
+      , microlens            ^>= 0.4.13
+      , microlens-th         ^>= 0.4.3
       , optparse-applicative ^>= 0.18.1
       , pretty-show          ^>= 1.10
       , primitive            ^>= 0.9

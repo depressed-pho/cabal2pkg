@@ -16,6 +16,7 @@ module Cabal2Pkg.CmdLine
   , category
   , maintainer
   , pkgFlags
+  , progDb
   , ghcVersion
   , installedPkgs
   , srcDb
@@ -32,7 +33,7 @@ import Cabal2Pkg.Utils ()
 import Control.Applicative ((<|>), many)
 import Control.Concurrent.Deferred (Deferred, defer, force)
 import Control.Exception.Safe (Exception(..), catch, throw)
-import Control.Monad (unless, when)
+import Control.Monad (foldM, unless, when)
 import Control.Monad.Catch (MonadThrow)
 import Control.Monad.Fix (MonadFix)
 import Control.Monad.IO.Unlift (MonadIO, MonadUnliftIO, liftIO)
@@ -52,6 +53,7 @@ import Distribution.Parsec (eitherParsec)
 import Distribution.Simple.Compiler qualified as C
 import Distribution.Simple.GHC qualified as GHC
 import Distribution.Simple.PackageIndex (InstalledPackageIndex)
+import Distribution.Simple.Program.Builtin qualified as C
 import Distribution.Simple.Program.Db (ProgramDb)
 import Distribution.Simple.Program.Db qualified as C
 import Distribution.Simple.Program.Types qualified as C
@@ -205,11 +207,20 @@ initialCtx opts
 mkProgDb :: CLI ProgramDb
 mkProgDb
   = do debug "Configuring program database..."
-       ghcBin     <- OP.decodeUtf =<< (optGHCBin <$> options)
-       (_, _, db) <- liftIO $
-                     GHC.configure silent (Just ghcBin) Nothing C.defaultProgramDb
-       debug . T.pack $ ppShow db
-       pure db
+       ghcBin      <- OP.decodeUtf =<< (optGHCBin <$> options)
+       (_, _, db0) <- liftIO $
+                      GHC.configure silent (Just ghcBin) Nothing C.defaultProgramDb
+       db1         <- liftIO $
+                      foldM (flip $ C.configureProgram silent) db0 bundledProgs
+       debug . T.pack $ ppShow db1
+       pure db1
+  where
+    -- We hate to hard-code these, but there seems to be no ways to avoid
+    -- it.
+    bundledProgs :: [C.Program]
+    bundledProgs = [ C.haddockProgram
+                   , C.hsc2hsProgram
+                   ]
 
 readPkgDb :: CLI InstalledPackageIndex
 readPkgDb

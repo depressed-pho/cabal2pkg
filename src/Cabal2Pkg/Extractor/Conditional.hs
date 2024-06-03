@@ -1,11 +1,13 @@
 {-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell #-}
 module Cabal2Pkg.Extractor.Conditional
   ( Environment(..)
-  , CondBlock(..)
+  , CondBlock(..), always, branches
+  , CondBranch(..), condition, ifTrue, ifFalse
+  , Condition(..)
   , extractCondBlock
   ) where
 
@@ -24,6 +26,8 @@ import Distribution.Types.Version (Version)
 import Distribution.Types.VersionRange (VersionRange, withinRange)
 import GHC.Generics (Generic, Generically(..))
 import GHC.Stack (HasCallStack)
+import Lens.Micro ((&), (^.), (%~), (.~))
+import Lens.Micro.TH (makeLenses)
 
 class Simplifiable a where
   simplify :: a -> a
@@ -38,16 +42,16 @@ data Environment = Environment
   deriving Show
 
 data CondBlock a = CondBlock
-  { always    :: !a
-  , branches  :: ![CondBranch a]
+  { _always   :: !a
+  , _branches :: ![CondBranch a]
   }
   deriving (Eq, Generic, Show)
   deriving (Monoid, Semigroup) via Generically (CondBlock a)
 
 data CondBranch a = CondBranch
-  { condition  :: !Condition
-  , ifTrue     :: !(CondBlock a)
-  , ifFalse    :: !(Maybe (CondBlock a))
+  { _condition :: !Condition
+  , _ifTrue    :: !(CondBlock a)
+  , _ifFalse   :: !(Maybe (CondBlock a))
   }
   deriving (Eq, Generic, Show)
 
@@ -62,6 +66,9 @@ data Condition
     , needsPrefs :: !Bool
     }
   deriving (Eq, Show)
+
+makeLenses ''CondBlock
+makeLenses ''CondBranch
 
 
 -- |Conditionals in the Cabal AST is fucking irritatingly
@@ -89,25 +96,25 @@ extractCondBlock extractContent extractOuter env = go
            extractOuter (C.condTreeData tree) block
 
     forceBlock :: HasCallStack => CondBlock (m c') -> m (CondBlock c')
-    forceBlock (CondBlock {..})
+    forceBlock bl
       = CondBlock
-        <$> always
-        <*> traverse forceBranch branches
+        <$> (bl ^. always)
+        <*> traverse forceBranch (bl ^. branches)
 
     forceBranch :: HasCallStack => CondBranch (m c') -> m (CondBranch c')
-    forceBranch (CondBranch {..})
+    forceBranch br
       = CondBranch
-        <$> pure condition
-        <*> forceBlock ifTrue
-        <*> traverse forceBlock ifFalse
+        <$> pure (br ^. condition)
+        <*> forceBlock (br ^. ifTrue)
+        <*> traverse forceBlock (br ^. ifFalse)
 
     mkBlock :: HasCallStack
             => C.CondTree C.ConfVar _c a
             -> (CondBlock (m c'))
     mkBlock tree
       = CondBlock
-        { always   = extractContent $ C.condTreeData tree
-        , branches = extractBranch <$> C.condTreeComponents tree
+        { _always   = extractContent $ C.condTreeData tree
+        , _branches = extractBranch <$> C.condTreeComponents tree
         }
 
     extractBranch :: HasCallStack
@@ -115,9 +122,9 @@ extractCondBlock extractContent extractOuter env = go
                   -> CondBranch (m c')
     extractBranch branch
       = CondBranch
-        { condition = extractCondition $ C.condBranchCondition branch
-        , ifTrue    = mkBlock $ C.condBranchIfTrue branch
-        , ifFalse   = mkBlock <$> C.condBranchIfFalse branch
+        { _condition = extractCondition $ C.condBranchCondition branch
+        , _ifTrue    = mkBlock $ C.condBranchIfTrue branch
+        , _ifFalse   = mkBlock <$> C.condBranchIfFalse branch
         }
 
     extractCondition :: HasCallStack => C.Condition C.ConfVar -> Condition
@@ -224,27 +231,25 @@ extractArchCond arch
 -- opposite. This means @'CondBlock' a@ has to form a semigroup.
 instance Semigroup a => Simplifiable (CondBlock a) where
   simplify block
-    = foldl' go (block { branches = [] }) (branches block)
+    = foldl' go (block & branches .~ []) (block ^. branches)
     where
       go :: CondBlock a -> CondBranch a -> CondBlock a
       go bl br
         = let br' = simplify br
-          in case simplify (condition br') of
-               Literal True  -> bl <> ifTrue br'
-               Literal False -> maybe bl (bl <>) (ifFalse br')
-               _             -> bl { branches = branches bl <> [br'] }
+          in case simplify $ br' ^. condition of
+               Literal True  -> bl <> (br' ^. ifTrue)
+               Literal False -> maybe bl (bl <>) (br' ^. ifFalse)
+               _             -> bl & branches %~ (<> [br'])
 
 instance (Eq a, Monoid a) => GarbageCollectable (CondBlock a) where
   garbageCollect block
-    = simplify $ block { branches = garbageCollect <$> branches block }
+    = simplify $ block & branches %~ (garbageCollect <$>)
 
 instance Semigroup a => Simplifiable (CondBranch a) where
-  simplify (CondBranch {..})
-    = CondBranch
-      { condition = simplify condition
-      , ifTrue    = simplify ifTrue
-      , ifFalse   = simplify <$> ifFalse
-      }
+  simplify
+    = (condition %~ simplify)
+    . (ifTrue    %~ simplify)
+    . (ifFalse   %~ (simplify <$>))
 
 -- |If the 'ifTrue' branch and the 'ifFalse' branch are both empty, the
 -- 'condition' becomes irrelevant so we can turn it into a constant. This
@@ -257,10 +262,10 @@ instance Semigroup a => Simplifiable (CondBranch a) where
 -- empty just because @a@ is 'Eq' and 'Monoid', without forcing the
 -- computation.
 instance (Eq a, Monoid a) => GarbageCollectable (CondBranch a) where
-  garbageCollect (CondBranch {..})
-    = let c = condition
-          t = garbageCollect ifTrue
-          f = garbageCollect <$> ifFalse
+  garbageCollect br
+    = let c = br ^. condition
+          t = garbageCollect $ br ^. ifTrue
+          f = garbageCollect <$> br ^. ifFalse
       in
         -- These comparisons regarding Maybe aren't beautiful. Can we do
         -- anything better?

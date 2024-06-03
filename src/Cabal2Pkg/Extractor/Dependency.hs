@@ -1,7 +1,7 @@
 {-# LANGUAGE DerivingVia #-}
-{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE TemplateHaskell #-}
 module Cabal2Pkg.Extractor.Dependency
-  ( DepSet(..)
+  ( DepSet(..), exeDeps, extLibDeps, libDeps, pkgConfDeps
   , extractDeps
   ) where
 
@@ -10,7 +10,6 @@ import Cabal2Pkg.Extractor.Dependency.Executable (ExeDep, extractExeDep)
 import Cabal2Pkg.Extractor.Dependency.ExternalLib (ExtLibDep, extractExtLibDep)
 import Cabal2Pkg.Extractor.Dependency.Library (LibDep, extractLibDep)
 import Cabal2Pkg.Extractor.Dependency.PkgConfig (PkgConfDep, extractPkgConfDep)
-import Data.Maybe (catMaybes)
 import Distribution.Simple.BuildToolDepends qualified as BTD
 import Distribution.Types.BuildInfo qualified as C
 import Distribution.Types.Dependency qualified as C
@@ -18,6 +17,7 @@ import Distribution.Types.PackageDescription qualified as C
 import Distribution.Types.PackageId qualified as C
 import GHC.Generics (Generic, Generically(..))
 import UnliftIO.Async (Conc, conc, runConc)
+import Lens.Micro.TH (makeLenses)
 
 
 -- |A set of various kinds of dependencies, such as tool dependencies,
@@ -28,39 +28,40 @@ import UnliftIO.Async (Conc, conc, runConc)
 -- should preserve the order the dependencies appear in @*.cabal@ files.
 data DepSet
   = DepSet
-    { exeDeps     :: ![ExeDep]
-    , extLibDeps  :: ![ExtLibDep]
-    , libDeps     :: ![LibDep]
-    , pkgConfDeps :: ![PkgConfDep]
+    { _exeDeps     :: ![ExeDep]
+    , _extLibDeps  :: ![ExtLibDep]
+    , _libDeps     :: ![LibDep]
+    , _pkgConfDeps :: ![PkgConfDep]
     }
   deriving (Eq, Generic, Show)
   deriving (Monoid, Semigroup) via Generically DepSet
 
+makeLenses ''DepSet
+
+
 extractDeps :: C.PackageDescription -> C.BuildInfo -> CLI DepSet
-extractDeps pkg bi@(C.BuildInfo {..})
+extractDeps pkg bi
   = runConc $ DepSet <$> execs <*> extLibs <*> libs <*> pkgConfLibs
   where
     execs :: Conc CLI [ExeDep]
-    execs = catMaybes
-            <$> traverse (conc . extractExeDep)
-                [ dep
-                | dep <- BTD.getAllToolDependencies pkg bi
-                , not (BTD.isInternal pkg dep)
-                ]
+    execs = traverse (conc . extractExeDep)
+            [ dep
+            | dep <- BTD.getAllToolDependencies pkg bi
+            , not (BTD.isInternal pkg dep)
+            ]
 
     extLibs :: Conc CLI [ExtLibDep]
-    extLibs = pure . (extractExtLibDep <$>) $ extraLibs
+    extLibs = pure . (extractExtLibDep <$>) $ C.extraLibs bi
 
     libs :: Conc CLI [LibDep]
-    libs = catMaybes
-           <$> traverse (conc . extractLibDep)
-               [ dep
-               | dep <- targetBuildDepends
-               , not (isInternalLib dep)
-               ]
+    libs = traverse (conc . extractLibDep)
+           [ dep
+           | dep <- C.targetBuildDepends bi
+           , not (isInternalLib dep)
+           ]
       where
         isInternalLib :: C.Dependency -> Bool
         isInternalLib = (C.pkgName (C.package pkg) ==) . C.depPkgName
 
     pkgConfLibs :: Conc CLI [PkgConfDep]
-    pkgConfLibs = pure . (extractPkgConfDep <$>) $ pkgconfigDepends
+    pkgConfLibs = pure . (extractPkgConfDep <$>) $ C.pkgconfigDepends bi
