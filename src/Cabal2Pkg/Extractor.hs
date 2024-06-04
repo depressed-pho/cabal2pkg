@@ -4,7 +4,7 @@ module Cabal2Pkg.Extractor
   , summariseCabal
   ) where
 
-import Cabal2Pkg.CmdLine (CLI)
+import Cabal2Pkg.CmdLine (CLI, FlagMap)
 import Cabal2Pkg.CmdLine qualified as CLI
 import Cabal2Pkg.Extractor.Component (ComponentMeta(..), extractComponents)
 import Cabal2Pkg.Extractor.License (extractLicense)
@@ -25,6 +25,7 @@ data PackageMeta = PackageMeta
   , maintainer :: !Text
   , comment    :: !Text
   , license    :: !Text
+  , flags      :: !FlagMap
   , components :: ![ComponentMeta]
   }
   deriving Show
@@ -34,6 +35,7 @@ summariseCabal :: GenericPackageDescription -> CLI PackageMeta
 summariseCabal gpd
   = do cat <- CLI.category
        mtr <- CLI.maintainer
+       fs  <- CLI.pkgFlags
        cs  <- extractComponents gpd
        pure PackageMeta
          { distName   = T.pack . prettyShow . PD.package $ pd
@@ -41,6 +43,7 @@ summariseCabal gpd
          , maintainer = fromMaybe "pkgsrc-users@NetBSD.org" mtr
          , comment    = T.pack . fromShortText . PD.synopsis $ pd
          , license    = extractLicense pd
+         , flags      = fs
          , components = cs
          }
   where

@@ -12,10 +12,13 @@ import Cabal2Pkg.Extractor.Dependency.Executable (ExeDep(..))
 import Cabal2Pkg.Extractor.Dependency.ExternalLib (ExtLibDep(..))
 import Cabal2Pkg.Extractor.Dependency.Library (LibDep(..))
 import Cabal2Pkg.Extractor.Dependency.PkgConfig (PkgConfDep(..))
+import Data.Map qualified as M
 import Data.Maybe (catMaybes)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
+import Distribution.Types.Flag (FlagName)
+import Distribution.Types.Flag qualified as C
 import Language.BMake.AST
   ( Makefile(..), Block, (#), (.=), (.+=), blank, include, prettyPrintAST )
 import Lens.Micro ((&), (^.), (.~), to)
@@ -29,7 +32,7 @@ genAST :: PackageMeta -> Makefile
 genAST meta
   = mconcat [ header
             , toolsAndConfigArgs
-            , mconcat $ genComponentAST <$> comps1
+            , mconcat $ genComponentAST <$> comps'
             , footer
             ]
   where
@@ -51,7 +54,7 @@ genAST meta
 
     toolsAndConfigArgs :: Makefile
     toolsAndConfigArgs
-      = let section = useTools -- <> configArgs
+      = let section = useTools <> configArgs
         in
           if section == mempty
           then section
@@ -76,10 +79,26 @@ genAST meta
               genExeDepsAST exeDeps'
           _ -> mempty
 
+    configArgs :: Makefile
+    configArgs
+      | M.null (flags meta) = mempty
+      | otherwise
+          = Makefile [ "CONFIGURE_ARGS" .+= flags' ]
+      where
+        flags' :: [Text]
+        flags' = go <$> M.toList (flags meta)
+
+        go :: (FlagName, Bool) -> Text
+        go (flag, True ) = "-f +" <> f2t flag
+        go (flag, False) = "-f -" <> f2t flag
+
+        f2t :: FlagName -> Text
+        f2t = T.pack . C.unFlagName
+
     -- If we only have a single component, remove unconditional tool
     -- dependencies because we move them just below the header.
-    comps1 :: [ComponentMeta]
-    comps1
+    comps' :: [ComponentMeta]
+    comps'
       = case components meta of
           (c:[]) ->
             let c' = c & cDeps . always . exeDeps .~ []

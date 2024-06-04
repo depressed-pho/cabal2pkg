@@ -49,7 +49,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.IO (hPutStrLn)
 import Database.Pkgsrc.SrcDb (SrcDb, createSrcDb)
-import Distribution.Parsec (eitherParsec)
+import Distribution.Parsec (explicitEitherParsec)
 import Distribution.Simple.Compiler qualified as C
 import Distribution.Simple.GHC qualified as GHC
 import Distribution.Simple.PackageIndex (InstalledPackageIndex)
@@ -141,7 +141,7 @@ flagMap :: ReadM FlagMap
 flagMap = eitherReader f
   where
     f :: String -> Either String FlagMap
-    f = second fa2Map . eitherParsec
+    f = second fa2Map . explicitEitherParsec C.legacyParsecFlagAssignment
 
     fa2Map :: C.FlagAssignment -> FlagMap
     fa2Map = M.fromList . C.unFlagAssignment
