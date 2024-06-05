@@ -7,6 +7,7 @@ module Cabal2Pkg.Extractor.Dependency.Library
 
 import Cabal2Pkg.CmdLine (CLI, installedPkgs, srcDb)
 import Control.Monad (join)
+import Data.Data (Data)
 import Database.Pkgsrc.SrcDb (Package)
 import Database.Pkgsrc.SrcDb qualified as SrcDb
 import Distribution.Parsec (eitherParsec)
@@ -34,8 +35,12 @@ data LibDep
     , needsUnrestricting :: !Bool
     }
   | KnownLib
-    { -- |The PKGPATH, such as @"math/hs-semigroupoids"@.
-      pkgPath :: !Text
+    { -- |The name of a Cabal package, such as @"semigroupoids"@. This
+      -- constructor is used when 'Cabal2Pkg.Extractor.summariseCabal'
+      -- finds that the dependency is packaged in pkgsrc.
+      name :: !Text
+      -- |The PKGPATH, such as @"math/hs-semigroupoids"@.
+    , pkgPath :: !Text
       -- |Whether the package needs to be listed in
       -- @HASKELL_UNRESTRICT_DEPENDENCIES@.
     , needsUnrestricting :: !Bool
@@ -47,7 +52,7 @@ data LibDep
       -- libraries in GHC.
       name :: !Text
     }
-  deriving (Eq, Show)
+  deriving (Data, Eq, Show)
 
 
 extractLibDep :: C.Dependency -> CLI LibDep
@@ -61,25 +66,20 @@ extractLibDep dep
                 Just (path, ver) -> pure $ found path ver
                 Nothing          -> pure $ notFound
   where
+    name' :: Text
+    name' = T.pack . C.unPackageName . C.depPkgName $ dep
+
+    needsU :: Version -> Bool
+    needsU ver = not $ C.withinRange ver (C.depVerRange dep)
+
     bundled :: Version -> LibDep
-    bundled ver
-      = BundledLib
-        { name               = T.pack . C.unPackageName . C.depPkgName $ dep
-        , needsUnrestricting = not $ C.withinRange ver (C.depVerRange dep)
-        }
+    bundled = BundledLib name' . needsU
 
     found :: Text -> Version -> LibDep
-    found path ver
-      = KnownLib
-        { pkgPath            = path
-        , needsUnrestricting = not $ C.withinRange ver (C.depVerRange dep)
-        }
+    found path = KnownLib name' path . needsU
 
     notFound :: LibDep
-    notFound
-      = UnknownLib
-        { name = T.pack . C.unPackageName . C.depPkgName $ dep
-        }
+    notFound = UnknownLib name'
 
 lookupBundled :: C.InstalledPackageIndex -> C.PackageName -> Maybe Version
 lookupBundled ipi name

@@ -13,6 +13,7 @@ module Cabal2Pkg.Extractor.Conditional
 
 import Cabal2Pkg.CmdLine (FlagMap)
 import Control.Monad.IO.Unlift (MonadUnliftIO)
+import Data.Data (Data)
 import Data.Foldable (foldl')
 import Data.Map.Strict qualified as M
 import Data.Text (Text)
@@ -45,7 +46,7 @@ data CondBlock a = CondBlock
   { _always   :: !a
   , _branches :: ![CondBranch a]
   }
-  deriving (Eq, Generic, Show)
+  deriving (Data, Eq, Generic, Show)
   deriving (Monoid, Semigroup) via Generically (CondBlock a)
 
 data CondBranch a = CondBranch
@@ -53,7 +54,7 @@ data CondBranch a = CondBranch
   , _ifTrue    :: !(CondBlock a)
   , _ifFalse   :: !(Maybe (CondBlock a))
   }
-  deriving (Eq, Generic, Show)
+  deriving (Data, Eq, Generic, Show)
 
 -- |An intermediate data type for Cabal conditions.
 data Condition
@@ -65,7 +66,7 @@ data Condition
     { expression :: !Text
     , needsPrefs :: !Bool
     }
-  deriving (Eq, Show)
+  deriving (Data, Eq, Show)
 
 makeLenses ''CondBlock
 makeLenses ''CondBranch

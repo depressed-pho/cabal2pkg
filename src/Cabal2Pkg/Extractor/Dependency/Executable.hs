@@ -6,6 +6,7 @@ module Cabal2Pkg.Extractor.Dependency.Executable
 
 import Cabal2Pkg.CmdLine (CLI, progDb, srcDb)
 import Control.Monad (join)
+import Data.Data (Data)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Database.Pkgsrc.SrcDb (Package)
@@ -43,7 +44,7 @@ data ExeDep
       -- corresponding package in pkgsrc.
       name :: !Text
     }
-  deriving (Eq, Show)
+  deriving (Data, Eq, Show)
 
 
 extractExeDep :: C.ExeDependency -> CLI ExeDep

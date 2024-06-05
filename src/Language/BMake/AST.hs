@@ -39,6 +39,7 @@ module Language.BMake.AST
 
 import Data.Foldable (foldl')
 import Data.List (intersperse)
+import Data.Maybe (isNothing)
 import Data.String (IsString(..))
 import Data.Semigroup (stimesMonoid)
 import Data.Sequence (Seq, (|>))
@@ -62,6 +63,9 @@ instance Pretty Text where
 
 tabWidth :: Integral n => n
 tabWidth = 8
+
+backslash :: Builder
+backslash = B.singleton '\\'
 
 space :: Builder
 space = B.singleton ' '
@@ -96,6 +100,9 @@ newtype Comment = Comment Text
 instance Pretty Comment where
   pretty _ (Comment c)
     = "# " <> B.fromText c
+
+pprOptionalComment :: Maybe Comment -> Builder
+pprOptionalComment = maybe mempty ((space <>) . pretty ())
 
 data Block
   = BBlank      !Blank
@@ -142,7 +149,7 @@ instance Pretty Assignment where
     = mconcat [ pre
               , stimesMonoid nTabs tab
               , pretty () aTokens
-              , maybe mempty ((space <>) . pretty ()) aComment
+              , pprOptionalComment aComment
               , newline
               ]
     where
@@ -181,7 +188,7 @@ data Rule
 instance Pretty Rule where
   pretty _ (Rule {..})
     = mconcat [ pretty () rDependency
-              , maybe mempty (pretty ()) rComment
+              , pprOptionalComment rComment
               , newline
               , mconcat $ pretty () <$> rCommands
               ]
@@ -300,8 +307,8 @@ data IncLoc
 
 data Conditional
   = Conditional
-    { branches  :: ![CondBranch]
-    , otherwise :: !(Maybe Makefile) -- ^@.else@
+    { branches :: ![CondBranch]
+    , else_    :: !(Maybe Makefile) -- ^@.else@
     }
   deriving (Show, Eq)
 
@@ -363,15 +370,54 @@ prettyPrintAST :: Makefile -> TL.Text
 prettyPrintAST = B.toLazyText . pretty 0
 
 pprAssignments :: Foldable t => t Assignment -> Builder
-pprAssignments as = foldr (\a -> (pretty alignment a <>)) mempty as
+pprAssignments as
+  | pprNormally = foldr (\a -> (pretty alignment a <>)) mempty as
+  | otherwise   = foldr (\a -> (pretty () (FoldedAssignment a) <>)) mempty as
   where
     alignment :: Int
-    alignment = foldl' go 0 as
+    alignment = foldl' maxAlign 0 as
 
-    go :: Int -> Assignment -> Int
-    go n (Assignment {..})
+    maxAlign :: Int -> Assignment -> Int
+    maxAlign n (Assignment {..})
       = let pre     = pretty () aVar <> pretty () aType
             len     = fromIntegral . TL.length . B.toLazyText $ pre
             aligned = ((len `div` tabWidth) + 1) * tabWidth
         in
           max n aligned
+
+    pprNormally :: Bool
+    pprNormally = alignment < 32 || length as > 1
+
+-- |A special case for singular assignments (i.e. ones that don't have
+-- preceding or following assignments) whose variable name is very
+-- long. Render them like this:
+--
+-- > SOME_VERY_LONG_VARIABLE+=	\
+-- > 	foo	\
+-- > 	bar
+--
+-- And not like this:
+--
+-- > SOME_VERY_LONG_VARIABLE+=	foo bar
+--
+newtype FoldedAssignment = FoldedAssignment Assignment
+
+instance Pretty FoldedAssignment where
+  pretty _ (FoldedAssignment (Assignment {..}))
+    = mconcat [ pretty () aVar
+              , pretty () aType
+              , tab
+              , if null aTokens && isNothing aComment
+                then "# empty"
+                else mconcat [ backslash
+                             , newline
+                             , go aTokens
+                             , pprOptionalComment aComment
+                             , newline
+                             ]
+              ]
+    where
+      go :: [Text] -> Builder
+      go []     = error "impossible"
+      go [x]    = tab <> B.fromText x
+      go (x:xs) = tab <> B.fromText x <> tab <> backslash <> newline <> go xs

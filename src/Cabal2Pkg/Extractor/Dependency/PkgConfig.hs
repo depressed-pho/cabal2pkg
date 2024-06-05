@@ -3,6 +3,7 @@ module Cabal2Pkg.Extractor.Dependency.PkgConfig
   , extractPkgConfDep
   ) where
 
+import Data.Data (Data)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Distribution.Types.PkgconfigDependency qualified as C
@@ -17,7 +18,7 @@ data PkgConfDep
     { -- |The name of a pkg-config package, such as @"cups"@.
       name :: !Text
     }
-  deriving (Eq, Show)
+  deriving (Data, Eq, Show)
 
 
 extractPkgConfDep :: C.PkgconfigDependency -> PkgConfDep

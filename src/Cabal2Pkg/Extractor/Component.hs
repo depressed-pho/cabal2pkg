@@ -13,6 +13,7 @@ import Cabal2Pkg.Extractor.Conditional
   ( Environment(..), CondBlock, extractCondBlock )
 import Cabal2Pkg.Extractor.Dependency (DepSet, extractDeps)
 import Control.Monad (unless)
+import Data.Data (Data)
 import Data.Foldable (foldl')
 import Data.Map.Strict qualified as M
 import Data.Set qualified as S
@@ -41,13 +42,13 @@ data ComponentMeta = ComponentMeta
   , _cName :: !Text
   , _cDeps :: !(CondBlock DepSet)
   }
-  deriving Show
+  deriving (Data, Show)
 
 data ComponentType
   = Library
   | ForeignLib
   | Executable
-  deriving Show
+  deriving (Data, Show)
 
 makeLenses ''ComponentMeta
 

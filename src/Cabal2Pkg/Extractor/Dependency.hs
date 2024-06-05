@@ -10,6 +10,7 @@ import Cabal2Pkg.Extractor.Dependency.Executable (ExeDep, extractExeDep)
 import Cabal2Pkg.Extractor.Dependency.ExternalLib (ExtLibDep, extractExtLibDep)
 import Cabal2Pkg.Extractor.Dependency.Library (LibDep, extractLibDep)
 import Cabal2Pkg.Extractor.Dependency.PkgConfig (PkgConfDep, extractPkgConfDep)
+import Data.Data (Data)
 import Distribution.Simple.BuildToolDepends qualified as BTD
 import Distribution.Types.BuildInfo qualified as C
 import Distribution.Types.Dependency qualified as C
@@ -33,7 +34,7 @@ data DepSet
     , _libDeps     :: ![LibDep]
     , _pkgConfDeps :: ![PkgConfDep]
     }
-  deriving (Eq, Generic, Show)
+  deriving (Data, Eq, Generic, Show)
   deriving (Monoid, Semigroup) via Generically DepSet
 
 makeLenses ''DepSet

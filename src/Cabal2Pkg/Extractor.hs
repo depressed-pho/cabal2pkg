@@ -8,6 +8,7 @@ import Cabal2Pkg.CmdLine (CLI, FlagMap)
 import Cabal2Pkg.CmdLine qualified as CLI
 import Cabal2Pkg.Extractor.Component (ComponentMeta(..), extractComponents)
 import Cabal2Pkg.Extractor.License (extractLicense)
+import Data.Data (Data)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -28,7 +29,7 @@ data PackageMeta = PackageMeta
   , flags      :: !FlagMap
   , components :: ![ComponentMeta]
   }
-  deriving Show
+  deriving (Data, Show)
 
 
 summariseCabal :: GenericPackageDescription -> CLI PackageMeta

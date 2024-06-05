@@ -3,6 +3,7 @@ module Cabal2Pkg.Extractor.Dependency.ExternalLib
   , extractExtLibDep
   ) where
 
+import Data.Data (Data)
 import Data.Text (Text)
 import Data.Text qualified as T
 
@@ -15,7 +16,7 @@ data ExtLibDep
     { -- |The name of an external library, such as @"z"@ for @libz@.
       name :: !Text
     }
-  deriving (Eq, Show)
+  deriving (Data, Eq, Show)
 
 
 extractExtLibDep :: String -> ExtLibDep

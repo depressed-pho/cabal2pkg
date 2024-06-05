@@ -12,7 +12,10 @@ import Cabal2Pkg.Extractor.Dependency.Executable (ExeDep(..))
 import Cabal2Pkg.Extractor.Dependency.ExternalLib (ExtLibDep(..))
 import Cabal2Pkg.Extractor.Dependency.Library (LibDep(..))
 import Cabal2Pkg.Extractor.Dependency.PkgConfig (PkgConfDep(..))
+import Data.Generics (GenericQ, everything, extQ, mkQ)
 import Data.Map qualified as M
+import Data.Set (Set)
+import Data.Set qualified as S
 import Data.Maybe (catMaybes)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -32,6 +35,7 @@ genAST :: PackageMeta -> Makefile
 genAST meta
   = mconcat [ header
             , toolsAndConfigArgs
+            , maybeUnrestrictDeps
             , mconcat $ genComponentAST <$> comps'
             , footer
             ]
@@ -49,9 +53,6 @@ genAST meta
              , blank
              ]
 
-    -- FIXME: Don't forget about needsUnrestricting
-    -- FIXME: And CONFIGURE_ARGS
-
     toolsAndConfigArgs :: Makefile
     toolsAndConfigArgs
       = let section = useTools <> configArgs
@@ -59,6 +60,43 @@ genAST meta
           if section == mempty
           then section
           else section <> Makefile [ blank ]
+
+    -- The list of HASKELL_UNRESTRICT_DEPENDENCIES. They don't need to be
+    -- conditionalised, so we gather all of them from the entire
+    -- conditional tree.
+    maybeUnrestrictDeps :: Makefile
+    maybeUnrestrictDeps
+      = if S.null depsToUnrestrict
+        then mempty
+        else Makefile [ "HASKELL_UNRESTRICT_DEPENDENCIES" .+= S.toList depsToUnrestrict
+                      , blank
+                      ]
+
+    depsToUnrestrict :: Set Text
+    depsToUnrestrict = everything (<>) f meta
+      where
+        f :: GenericQ (Set Text)
+        f = mkQ mempty qExeDep `extQ` qLibDep
+
+        qExeDep :: ExeDep -> Set Text
+        qExeDep (BundledExe {..})
+          | needsUnrestricting = S.singleton name
+          | otherwise          = mempty
+        qExeDep (KnownExe {..})
+          | needsUnrestricting = S.singleton name
+          | otherwise          = mempty
+        qExeDep (UnknownExe {})
+          = mempty
+
+        qLibDep :: LibDep -> Set Text
+        qLibDep (BundledLib {..})
+          | needsUnrestricting = S.singleton name
+          | otherwise          = mempty
+        qLibDep (KnownLib {..})
+          | needsUnrestricting = S.singleton name
+          | otherwise          = mempty
+        qLibDep (UnknownLib {})
+          = mempty
 
     -- The top-level USE_TOOLS. This exists only when we have just one
     -- component and at least one unconditional pkg-config dependency or an
