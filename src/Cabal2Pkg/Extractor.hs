@@ -10,6 +10,7 @@ import Cabal2Pkg.Extractor.Component (ComponentMeta(..), extractComponents)
 import Cabal2Pkg.Extractor.License (extractLicense)
 import Data.Data (Data)
 import Data.Maybe (fromMaybe)
+import Data.Set (Set)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Distribution.Pretty (prettyShow)
@@ -27,6 +28,7 @@ data PackageMeta = PackageMeta
   , comment    :: !Text
   , license    :: !Text
   , flags      :: !FlagMap
+  , unrestrict :: !(Set Text)
   , components :: ![ComponentMeta]
   }
   deriving (Data, Show)
@@ -34,10 +36,10 @@ data PackageMeta = PackageMeta
 
 summariseCabal :: GenericPackageDescription -> CLI PackageMeta
 summariseCabal gpd
-  = do cat <- CLI.category
-       mtr <- CLI.maintainer
-       fs  <- CLI.pkgFlags
-       cs  <- extractComponents gpd
+  = do cat      <- CLI.category
+       mtr      <- CLI.maintainer
+       fs       <- CLI.pkgFlags
+       (cs, ts) <- extractComponents gpd
        pure PackageMeta
          { distName   = T.pack . prettyShow . PD.package $ pd
          , categories = [cat]
@@ -45,6 +47,7 @@ summariseCabal gpd
          , comment    = T.pack . fromShortText . PD.synopsis $ pd
          , license    = extractLicense pd
          , flags      = fs
+         , unrestrict = ts
          , components = cs
          }
   where

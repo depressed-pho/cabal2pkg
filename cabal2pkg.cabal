@@ -71,7 +71,6 @@ executable cabal2pkg
       , resourcet            ^>= 1.3.0
       , safe-exceptions      ^>= 0.1.7
       , stm                  ^>= 2.5.2
-      , syb                  ^>= 0.7.2
       , tar-conduit          ^>= 0.4.1
       , template-haskell      >= 2.21
       , text                 ^>= 2.1.1

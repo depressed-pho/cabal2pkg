@@ -22,32 +22,23 @@ import Distribution.Types.VersionRange qualified as C
 
 -- |Dependency on a tool provided by a pkgsrc package.
 data ExeDep
-  = BundledExe
-    { -- |The name of a tool, such as @"hsc2hs"@. This constructor is used
-      -- when 'Cabal2Pkg.Extractor.summariseCabal' finds that the tool is
-      -- bundled with the compiler.
-      name :: !Text
-      -- |Whether the package needs to be listed in
-      -- @HASKELL_UNRESTRICT_DEPENDENCIES@.
-    , needsUnrestricting :: !Bool
-    }
-  | KnownExe
+  = KnownExe
     { -- |The name of a tool to be listed in @USE_TOOLS@.
       name :: !Text
-      -- |Whether the package needs to be listed in
-      -- @HASKELL_UNRESTRICT_DEPENDENCIES@.
-    , needsUnrestricting :: !Bool
     }
   | UnknownExe
-    { -- |The name of a Cabal package, such as @"alex"@. This constructor
-      -- is used when 'Cabal2Pkg.Extractor.summariseCabal' cannot find the
+    { -- |The name of Cabal package, such as @"alex"@. This constructor is
+      -- used when 'Cabal2Pkg.Extractor.summariseCabal' cannot find the
       -- corresponding package in pkgsrc.
       name :: !Text
     }
   deriving (Data, Eq, Show)
 
 
-extractExeDep :: C.ExeDependency -> CLI ExeDep
+-- |Return @(md, mt)@ where @md@ is 'Nothing' if the dependency is bundled
+-- with the compiler, and @mt@ is the name of Cabal package if it needs to
+-- be listed in @HASKELL_UNRESTRICT_DEPENDENCIES@.
+extractExeDep :: C.ExeDependency -> CLI (Maybe ExeDep, Maybe Text)
 extractExeDep (C.ExeDependency pkgName _ verRange)
   = do progs <- progDb
        case lookupBundled progs pkgName of
@@ -58,25 +49,27 @@ extractExeDep (C.ExeDependency pkgName _ verRange)
                 Just (name, ver) -> pure $ found name ver
                 Nothing          -> pure $ notFound
   where
-    bundled :: Version -> ExeDep
+    name' :: Text
+    name' = T.pack . C.unPackageName $ pkgName
+
+    needsU :: Version -> Maybe Text
+    needsU ver
+      | not $ C.withinRange ver verRange
+          = Just name'
+      | otherwise
+          = Nothing
+
+    bundled :: Version -> (Maybe ExeDep, Maybe Text)
     bundled ver
-      = BundledExe
-        { name               = T.pack $ C.unPackageName pkgName
-        , needsUnrestricting = not $ C.withinRange ver verRange
-        }
+      = (Nothing, needsU ver)
 
-    found :: Text -> Version -> ExeDep
+    found :: Text -> Version -> (Maybe ExeDep, Maybe Text)
     found name ver
-      = KnownExe
-        { name               = name
-        , needsUnrestricting = not $ C.withinRange ver verRange
-        }
+      = (Just (KnownExe name), needsU ver)
 
-    notFound :: ExeDep
+    notFound :: (Maybe ExeDep, Maybe Text)
     notFound
-      = UnknownExe
-        { name = T.pack $ C.unPackageName pkgName
-        }
+      = (Just (UnknownExe name'), Nothing)
 
 lookupBundled :: C.ProgramDb -> C.PackageName -> Maybe Version
 lookupBundled progs pkgName

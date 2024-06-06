@@ -25,25 +25,13 @@ import Data.Text qualified as T
 -- |Dependency on a library provided by either the compiler or a pkgsrc
 -- package.
 data LibDep
-  = BundledLib
-    { -- |The name of a Cabal package, such as @"base"@. This constructor
-      -- is used when 'Cabal2Pkg.Extractor.summariseCabal' finds that
-      -- the dependency is bundled with the compiler.
-      name :: !Text
-      -- |Whether the package needs to be listed in
-      -- @HASKELL_UNRESTRICT_DEPENDENCIES@.
-    , needsUnrestricting :: !Bool
-    }
-  | KnownLib
-    { -- |The name of a Cabal package, such as @"semigroupoids"@. This
+  = KnownLib
+    { -- |The name of Cabal package, such as @"semigroupoids"@. This
       -- constructor is used when 'Cabal2Pkg.Extractor.summariseCabal'
       -- finds that the dependency is packaged in pkgsrc.
       name :: !Text
       -- |The PKGPATH, such as @"math/hs-semigroupoids"@.
     , pkgPath :: !Text
-      -- |Whether the package needs to be listed in
-      -- @HASKELL_UNRESTRICT_DEPENDENCIES@.
-    , needsUnrestricting :: !Bool
     }
   | UnknownLib
     { -- |The name of a Cabal package, such as @"semigroupoids"@. This
@@ -55,7 +43,10 @@ data LibDep
   deriving (Data, Eq, Show)
 
 
-extractLibDep :: C.Dependency -> CLI LibDep
+-- |Return @(md, mt)@ where @md@ is 'Nothing' if the dependency is bundled
+-- with the compiler, and @mt@ is the name of Cabal package if it needs to
+-- be listed in @HASKELL_UNRESTRICT_DEPENDENCIES@.
+extractLibDep :: C.Dependency -> CLI (Maybe LibDep, Maybe Text)
 extractLibDep dep
   = do ipi <- installedPkgs
        case lookupBundled ipi (C.depPkgName dep) of
@@ -69,17 +60,24 @@ extractLibDep dep
     name' :: Text
     name' = T.pack . C.unPackageName . C.depPkgName $ dep
 
-    needsU :: Version -> Bool
-    needsU ver = not $ C.withinRange ver (C.depVerRange dep)
+    needsU :: Version -> Maybe Text
+    needsU ver
+      | not $ C.withinRange ver (C.depVerRange dep)
+          = Just name'
+      | otherwise
+          = Nothing
 
-    bundled :: Version -> LibDep
-    bundled = BundledLib name' . needsU
+    bundled :: Version -> (Maybe LibDep, Maybe Text)
+    bundled ver
+      = (Nothing, needsU ver)
 
-    found :: Text -> Version -> LibDep
-    found path = KnownLib name' path . needsU
+    found :: Text -> Version -> (Maybe LibDep, Maybe Text)
+    found path ver
+      = (Just (KnownLib name' path), needsU ver)
 
-    notFound :: LibDep
-    notFound = UnknownLib name'
+    notFound :: (Maybe LibDep, Maybe Text)
+    notFound
+      = (Just (UnknownLib name'), Nothing)
 
 lookupBundled :: C.InstalledPackageIndex -> C.PackageName -> Maybe Version
 lookupBundled ipi name

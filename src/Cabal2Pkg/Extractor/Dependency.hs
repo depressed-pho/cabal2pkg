@@ -11,13 +11,16 @@ import Cabal2Pkg.Extractor.Dependency.ExternalLib (ExtLibDep, extractExtLibDep)
 import Cabal2Pkg.Extractor.Dependency.Library (LibDep, extractLibDep)
 import Cabal2Pkg.Extractor.Dependency.PkgConfig (PkgConfDep, extractPkgConfDep)
 import Data.Data (Data)
+import Data.Set (Set)
+import Data.Set qualified as S
+import Data.Text (Text)
 import Distribution.Simple.BuildToolDepends qualified as BTD
 import Distribution.Types.BuildInfo qualified as C
 import Distribution.Types.Dependency qualified as C
 import Distribution.Types.PackageDescription qualified as C
 import Distribution.Types.PackageId qualified as C
 import GHC.Generics (Generic, Generically(..))
-import UnliftIO.Async (Conc, conc, runConc)
+import UnliftIO.Async (Conc, conc)
 import Lens.Micro.TH (makeLenses)
 
 
@@ -40,12 +43,29 @@ data DepSet
 makeLenses ''DepSet
 
 
-extractDeps :: C.PackageDescription -> C.BuildInfo -> CLI DepSet
+-- |The second element of the tuple is a set of Cabal packages that need to
+-- be listed in @HASKELL_UNRESTRICT_DEPENDENCIES@.
+extractDeps :: C.PackageDescription -> C.BuildInfo -> Conc CLI (DepSet, Set Text)
 extractDeps pkg bi
-  = runConc $ DepSet <$> execs <*> extLibs <*> libs <*> pkgConfLibs
+  = aggregateAll <$> execs <*> extLibs <*> libs <*> pkgConfLibs
   where
-    execs :: Conc CLI [ExeDep]
-    execs = traverse (conc . extractExeDep)
+    aggregateAll :: ([ExeDep], Set Text)
+                 -> [ExtLibDep]
+                 -> ([LibDep], Set Text)
+                 -> [PkgConfDep]
+                 -> (DepSet, Set Text)
+    aggregateAll (eds, ts0) elds (lds, ts1) pcds
+      = (DepSet eds elds lds pcds, ts0 <> ts1)
+
+    aggregateEach :: [(Maybe a, Maybe Text)] -> ([a], Set Text)
+    aggregateEach = foldr go ([], mempty)
+      where
+        go (a, b) (as, bs) = ( maybe as (: as) a
+                             , maybe bs (flip S.insert bs) b
+                             )
+
+    execs :: Conc CLI ([ExeDep], Set Text)
+    execs = aggregateEach <$> traverse (conc . extractExeDep)
             [ dep
             | dep <- BTD.getAllToolDependencies pkg bi
             , not (BTD.isInternal pkg dep)
@@ -54,8 +74,8 @@ extractDeps pkg bi
     extLibs :: Conc CLI [ExtLibDep]
     extLibs = pure . (extractExtLibDep <$>) $ C.extraLibs bi
 
-    libs :: Conc CLI [LibDep]
-    libs = traverse (conc . extractLibDep)
+    libs :: Conc CLI ([LibDep], Set Text)
+    libs = aggregateEach <$> traverse (conc . extractLibDep)
            [ dep
            | dep <- C.targetBuildDepends bi
            , not (isInternalLib dep)

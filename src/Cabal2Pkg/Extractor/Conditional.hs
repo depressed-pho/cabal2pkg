@@ -1,6 +1,7 @@
 {-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
 module Cabal2Pkg.Extractor.Conditional
@@ -29,7 +30,7 @@ import GHC.Generics (Generic, Generically(..))
 import GHC.Stack (HasCallStack)
 import Lens.Micro ((&), (^.), (%~), (.~))
 import Lens.Micro.TH (makeLenses)
-import UnliftIO.Async (Conc, conc, runConc)
+import UnliftIO.Async (Conc, runConc)
 
 class Simplifiable a where
   simplify :: a -> a
@@ -47,7 +48,7 @@ data CondBlock a = CondBlock
   { _always   :: !a
   , _branches :: ![CondBranch a]
   }
-  deriving (Data, Eq, Generic, Show)
+  deriving (Data, Eq, Functor, Foldable, Generic, Show, Traversable)
   deriving (Monoid, Semigroup) via Generically (CondBlock a)
 
 data CondBranch a = CondBranch
@@ -55,7 +56,7 @@ data CondBranch a = CondBranch
   , _ifTrue    :: !(CondBlock a)
   , _ifFalse   :: !(Maybe (CondBlock a))
   }
-  deriving (Data, Eq, Generic, Show)
+  deriving (Data, Eq, Functor, Foldable, Generic, Show, Traversable)
 
 -- |An intermediate data type for Cabal conditions.
 data Condition
@@ -85,8 +86,8 @@ extractCondBlock :: forall m a a' _c c' .
                     , Monoid c'
                     , Eq c'
                     )
-                 => (a -> m c')
-                 -> (a -> CondBlock c' -> m a')
+                 => (a -> Conc m c')
+                 -> (a -> CondBlock c' -> a')
                  -> Environment
                  -> C.CondTree C.ConfVar _c a
                  -> m a'
@@ -95,15 +96,15 @@ extractCondBlock extractContent extractOuter env = go
     go :: HasCallStack => C.CondTree C.ConfVar _c a -> m a'
     go tree
       = do block <- (garbageCollect <$>) . runConc . forceBlock . simplify $ mkBlock tree
-           extractOuter (C.condTreeData tree) block
+           pure $ extractOuter (C.condTreeData tree) block
 
-    forceBlock :: HasCallStack => CondBlock (m c') -> Conc m (CondBlock c')
+    forceBlock :: HasCallStack => CondBlock (Conc m c') -> Conc m (CondBlock c')
     forceBlock bl
       = CondBlock
-        <$> conc (bl ^. always)
+        <$> (bl ^. always)
         <*> traverse forceBranch (bl ^. branches)
 
-    forceBranch :: HasCallStack => CondBranch (m c') -> Conc m (CondBranch c')
+    forceBranch :: HasCallStack => CondBranch (Conc m c') -> Conc m (CondBranch c')
     forceBranch br
       = CondBranch
         <$> pure (br ^. condition)
@@ -112,7 +113,7 @@ extractCondBlock extractContent extractOuter env = go
 
     mkBlock :: HasCallStack
             => C.CondTree C.ConfVar _c a
-            -> (CondBlock (m c'))
+            -> CondBlock (Conc m c')
     mkBlock tree
       = CondBlock
         { _always   = extractContent $ C.condTreeData tree
@@ -121,7 +122,7 @@ extractCondBlock extractContent extractOuter env = go
 
     extractBranch :: HasCallStack
                   => C.CondBranch C.ConfVar _c a
-                  -> CondBranch (m c')
+                  -> CondBranch (Conc m c')
     extractBranch branch
       = CondBranch
         { _condition = extractCondition $ C.condBranchCondition branch
