@@ -29,6 +29,7 @@ import GHC.Generics (Generic, Generically(..))
 import GHC.Stack (HasCallStack)
 import Lens.Micro ((&), (^.), (%~), (.~))
 import Lens.Micro.TH (makeLenses)
+import UnliftIO.Async (Conc, conc, runConc)
 
 class Simplifiable a where
   simplify :: a -> a
@@ -93,16 +94,16 @@ extractCondBlock extractContent extractOuter env = go
   where
     go :: HasCallStack => C.CondTree C.ConfVar _c a -> m a'
     go tree
-      = do block <- (garbageCollect <$>) . forceBlock . simplify $ mkBlock tree
+      = do block <- (garbageCollect <$>) . runConc . forceBlock . simplify $ mkBlock tree
            extractOuter (C.condTreeData tree) block
 
-    forceBlock :: HasCallStack => CondBlock (m c') -> m (CondBlock c')
+    forceBlock :: HasCallStack => CondBlock (m c') -> Conc m (CondBlock c')
     forceBlock bl
       = CondBlock
-        <$> (bl ^. always)
+        <$> conc (bl ^. always)
         <*> traverse forceBranch (bl ^. branches)
 
-    forceBranch :: HasCallStack => CondBranch (m c') -> m (CondBranch c')
+    forceBranch :: HasCallStack => CondBranch (m c') -> Conc m (CondBranch c')
     forceBranch br
       = CondBranch
         <$> pure (br ^. condition)
