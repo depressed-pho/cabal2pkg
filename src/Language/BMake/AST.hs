@@ -22,7 +22,7 @@ module Language.BMake.AST
   , Conditional(..)
   , CondBranch(..)
   , Condition(..)
-  , LogicalOp(..)
+  , LogicalExpr(..)
   , RelationalOp(..)
   , Expr(..)
 
@@ -32,27 +32,32 @@ module Language.BMake.AST
   , (.=)
   , (.+=)
   , include
+  , (?==)
 
     -- * Pretty-printing
   , prettyPrintAST
   ) where
 
+import Data.Data (Data)
 import Data.Foldable (foldl')
 import Data.List (intersperse)
+import Data.List.NonEmpty (NonEmpty((:|)))
+import Data.List.NonEmpty qualified as NE
 import Data.Maybe (isNothing)
 import Data.String (IsString(..))
-import Data.Semigroup (stimesMonoid)
+import Data.Semigroup (sconcat, stimesMonoid)
 import Data.Sequence (Seq, (|>))
 import Data.Text (Text)
 import Data.Text.Lazy qualified as TL
 import Data.Text.Lazy.Builder (Builder)
 import Data.Text.Lazy.Builder qualified as B
+import Prelude hiding (Ordering(..))
 
 
 class Pretty a where
   type Context a
   type instance Context a = ()
-  pretty :: Context a -> a -> Builder
+  pretty  :: Context a -> a -> Builder
 
 instance Pretty a => Pretty [a] where
   type Context [a] = Context a
@@ -76,8 +81,14 @@ newline = B.singleton '\n'
 tab :: Builder
 tab = B.singleton '\t'
 
+dotSpace :: Int -> Builder
+dotSpace depth = B.singleton '.' <> stimesMonoid (depth * 2) space
+
+parens :: Builder -> Builder
+parens b = B.singleton '(' <> b <> B.singleton ')'
+
 newtype Makefile = Makefile { blocks :: [Block] }
-  deriving (Show, Eq, Semigroup, Monoid)
+  deriving (Data, Show, Eq, Semigroup, Monoid)
 
 instance Pretty Makefile where
   -- |The current depth of nested directives.
@@ -95,7 +106,7 @@ instance Pretty Makefile where
           BDirective  x -> pprAssignments as <> pretty depth x <> go mempty bs
 
 newtype Comment = Comment Text
-  deriving (Show, Eq, IsString)
+  deriving (Data, Show, Eq, IsString)
 
 instance Pretty Comment where
   pretty _ (Comment c)
@@ -109,17 +120,17 @@ data Block
   | BAssignment !Assignment
   | BRule       !Rule
   | BDirective  !Directive
-  deriving (Show, Eq)
+  deriving (Data, Show, Eq)
 
 newtype Variable = Variable Text
-  deriving (Show, Eq, IsString)
+  deriving (Data, Show, Eq, IsString)
 
 instance Pretty Variable where
   pretty _ (Variable name)
     = B.fromText name
 
 newtype Target = Target Text
-  deriving (Show, Eq, IsString)
+  deriving (Data, Show, Eq, IsString)
 
 instance Pretty Target where
   pretty _ (Target path)
@@ -127,7 +138,7 @@ instance Pretty Target where
 
 -- |A blank line.
 newtype Blank = Blank { bComment :: (Maybe Comment) }
-  deriving (Show, Eq)
+  deriving (Data, Show, Eq)
 
 instance Pretty Blank where
   pretty _ (Blank c)
@@ -140,7 +151,7 @@ data Assignment
     , aTokens  :: ![Text]
     , aComment :: !(Maybe Comment)
     }
-  deriving (Show, Eq)
+  deriving (Data, Show, Eq)
 
 instance Pretty Assignment where
   -- |The column number to align tokens.
@@ -168,7 +179,7 @@ data AssignmentType
   | SetIfUndefined -- ^@?=@
   | ExpandThenSet  -- ^@:=@
   | ExecThenSet    -- ^@!=@
-  deriving (Show, Eq)
+  deriving (Data, Show, Eq)
 
 instance Pretty AssignmentType where
   pretty _ Set            = B.singleton '='
@@ -183,7 +194,7 @@ data Rule
     , rComment    :: !(Maybe Comment)
     , rCommands   :: ![ShellCmd]
     }
-  deriving (Show, Eq)
+  deriving (Data, Show, Eq)
 
 instance Pretty Rule where
   pretty _ (Rule {..})
@@ -199,7 +210,7 @@ data Dependency
     , dType    :: !DependencyType
     , dSources :: ![Text]
     }
-  deriving (Show, Eq)
+  deriving (Data, Show, Eq)
 
 instance Pretty Dependency where
   pretty _ (Dependency {..})
@@ -213,7 +224,7 @@ data DependencyType
   = IfOlderThan  -- ^@:@
   | Always       -- ^@!@
   | NoAccumulate -- ^@::@
-  deriving (Show, Eq)
+  deriving (Data, Show, Eq)
 
 instance Pretty DependencyType where
   pretty _ IfOlderThan  = B.singleton ':'
@@ -221,7 +232,7 @@ instance Pretty DependencyType where
   pretty _ NoAccumulate = "::"
 
 data ShellCmd = ShellCmd ![CommandMode] !Text
-  deriving (Show, Eq)
+  deriving (Data, Show, Eq)
 
 instance Pretty ShellCmd where
   pretty _ (ShellCmd modes cmd)
@@ -234,7 +245,7 @@ data CommandMode
   = NoEcho -- ^@\@@
   | Dry    -- ^@+@
   | IgnErr -- ^@-@
-  deriving (Show, Eq)
+  deriving (Data, Show, Eq)
 
 instance Pretty CommandMode where
   pretty _ NoEcho = B.singleton '@'
@@ -254,7 +265,7 @@ data Directive
   | DWarning     !Text             -- ^@.warning MESSAGE@
   | DConditional !Conditional      -- ^@.if@ and its families
   | DFor         ![Variable] !Text -- ^@.for@
-  deriving (Show, Eq)
+  deriving (Data, Show, Eq)
 
 instance Pretty Directive where
   -- |The current depth of nested directives.
@@ -273,11 +284,11 @@ instance Pretty Directive where
              DUnexport    vars      -> dot <> "unexport "       <> pretty () vars
              DUnexportEnv vars      -> dot <> "unexport-env"    <> pretty () vars
              DWarning     msg       -> dot <> "warning "        <> B.fromText msg
-             DConditional cond      -> error ("FIXME: " <> show cond)
+             DConditional cond      -> pprConditional cond
              DFor         vars expr -> error ("FIXME: .for " <> show vars <> " in " <> show expr)
 
       dot :: Builder
-      dot = B.singleton '.' <> stimesMonoid depth space
+      dot = dotSpace depth
 
       pprInclude :: IncMode -> IncLoc -> Text -> Builder
       pprInclude mode loc file
@@ -288,12 +299,32 @@ instance Pretty Directive where
                       System -> B.singleton '<' <> B.fromText file <> B.singleton '>'
                       User   -> B.singleton '"' <> B.fromText file <> B.singleton '"'
 
+      pprConditional :: Conditional -> Builder
+      pprConditional (Conditional {..})
+        = mconcat [ pprBranches branches
+                  , pprElse else_
+                  , dot
+                  , "endif"
+                  ]
+
+      pprBranches :: NonEmpty CondBranch -> Builder
+      pprBranches (br :| brs)
+        = pretty (True, depth) br <>
+          mconcat (pretty (False, depth) <$> brs)
+
+      pprElse :: Maybe Makefile -> Builder
+      pprElse Nothing  = mempty
+      pprElse (Just m) = mconcat [ dot
+                                 , "else"
+                                 , newline
+                                 , pretty (depth + 1) m
+                                 ]
 
 data IncMode
   = Normal -- ^@.include@
   | SMode  -- ^@.sinclude@
   | DMode  -- ^@.dinclude@
-  deriving (Show, Eq)
+  deriving (Data, Show, Eq)
 
 instance Pretty IncMode where
   pretty _ Normal = "include"
@@ -303,30 +334,85 @@ instance Pretty IncMode where
 data IncLoc
   = System -- ^@.include <FILE>@
   | User   -- ^@.include "FILE"@
-  deriving (Show, Eq)
+  deriving (Data, Show, Eq)
 
 data Conditional
   = Conditional
-    { branches :: ![CondBranch]
+    { branches :: !(NonEmpty CondBranch)
     , else_    :: !(Maybe Makefile) -- ^@.else@
     }
-  deriving (Show, Eq)
+  deriving (Data, Show, Eq)
+
+instance Semigroup Conditional where
+  ca <> cb
+    = case else_ ca of
+        Nothing ->
+          -- ca has no .else block, which means we can merge ca and cb
+          -- without nesting them.
+          ca { branches = branches ca <> branches cb
+             , else_    = else_ cb
+             }
+
+        Just ea ->
+          -- ca has a .else block, which means we must put cb inside the
+          -- block.
+          ca { else_ = Just (ea <> Makefile [BDirective (DConditional cb)]) }
 
 data CondBranch = CondBranch !Condition !Makefile
-  deriving (Show, Eq)
+  deriving (Data, Show, Eq)
+
+instance Pretty CondBranch where
+  type Context CondBranch = (Bool, Int)
+  pretty ctx@(_, depth) (CondBranch cond m)
+    = mconcat [ pretty ctx cond
+              , newline
+              , pretty (depth + 1) m
+              ]
 
 data Condition
-  = If        !Bool !Expr     ![(LogicalOp, Expr    )] -- ^@.if [!]EXPR [OP EXPR ...]@
-  | Ifdef     !Bool !Variable ![(LogicalOp, Variable)] -- ^@.ifdef [!]VARIABLE [OP VARIABLE ...]@
-  | Ifndef    !Bool !Variable ![(LogicalOp, Variable)] -- ^@.ifndef [!]VARIABLE [OP VARIABLE ...]@
-  | Ifmake    !Bool !Target   ![(LogicalOp, Target  )] -- ^@.ifmake [!]TARGET [OP TARGET ...]@
-  | Ifnmake   !Bool !Target   ![(LogicalOp, Target  )] -- ^@.ifnmake [!]TARGET [OP TARGET ...]@
-  deriving (Show, Eq)
+  = If      !(LogicalExpr Expr    ) -- ^@.if@
+  | Ifdef   !(LogicalExpr Variable) -- ^@.ifdef@
+  | Ifndef  !(LogicalExpr Variable) -- ^@.ifndef@
+  | Ifmake  !(LogicalExpr Target  ) -- ^@.ifmake@
+  | Ifnmake !(LogicalExpr Target  ) -- ^@.ifnmake@
+  deriving (Data, Show, Eq)
 
-data LogicalOp
-  = OR  -- ^@||@
-  | AND -- ^@&&@
-  deriving (Show, Eq)
+instance Pretty Condition where
+  type Context Condition = (Bool, Int)
+  pretty (isFirst, depth) cond
+    = dot <> go cond
+    where
+      dot :: Builder
+      dot = dotSpace depth
+
+      go :: Condition -> Builder
+      go (If      expr) = mconcat [switch "if"     , space, pretty (False, False) expr]
+      go (Ifdef   expr) = mconcat [switch "ifdef"  , space, pretty (False, ()   ) expr]
+      go (Ifndef  expr) = mconcat [switch "ifndef" , space, pretty (False, ()   ) expr]
+      go (Ifmake  expr) = mconcat [switch "ifmake" , space, pretty (False, ()   ) expr]
+      go (Ifnmake expr) = mconcat [switch "ifnmake", space, pretty (False, ()   ) expr]
+
+      switch :: Builder -> Builder
+      switch b
+        | isFirst   = b
+        | otherwise = "el" <> b
+
+data LogicalExpr a
+  = Not  !(LogicalExpr a)            -- ^@!@
+  | Or   !(NonEmpty (LogicalExpr a)) -- ^@||@
+  | And  !(NonEmpty (LogicalExpr a)) -- ^@&&@
+  | Expr !a
+  deriving (Data, Show, Eq)
+
+instance Pretty a => Pretty (LogicalExpr a) where
+  -- |Whether the expression is a nested one.
+  type Context (LogicalExpr a) = (Bool, Context a)
+  pretty (_, ctx) (Not e ) = B.singleton '!' <> pretty (True, ctx) e
+  pretty (_, ctx) (Or  es) = sconcat $ NE.intersperse " || " $ pretty (True, ctx) <$> es
+  pretty (_, ctx) (And es) = sconcat $ NE.intersperse " && " $ pretty (True, ctx) <$> es
+  pretty (isNested, ctx) (Expr e)
+    | isNested  = parens $ pretty ctx e
+    | otherwise =          pretty ctx e
 
 data RelationalOp
   = EQ -- ^@==@
@@ -335,7 +421,15 @@ data RelationalOp
   | LE -- ^@<=@
   | GT -- ^@>@
   | GE -- ^@>=@
-  deriving (Show, Eq)
+  deriving (Data, Show, Eq)
+
+instance Pretty RelationalOp where
+  pretty _ EQ = "=="
+  pretty _ NE = "!="
+  pretty _ LT = B.singleton '<'
+  pretty _ LE = "<="
+  pretty _ GT = B.singleton '>'
+  pretty _ GE = ">="
 
 data Expr
   = EDefined  !Variable -- ^@defined(VARIABLE)@
@@ -345,7 +439,32 @@ data Expr
   | ETarget   !Target   -- ^@target(TARGET)@
   | ECommands !Target   -- ^@commands(TARGET)@
   | ECompare  !Text !(Maybe (RelationalOp, Text))
-  deriving (Show, Eq)
+  deriving (Data, Show, Eq)
+
+instance Pretty Expr where
+  -- |Whether the expression is a nested one.
+  type Context Expr = Bool
+  pretty _ (EDefined  var ) = "defined"  <> parens (pretty () var )
+  pretty _ (EMake     tgt ) = "make"     <> parens (pretty () tgt )
+  pretty _ (EEmpty    var ) = "empty"    <> parens (pretty () var )
+  pretty _ (EExists   file) = "exists"   <> parens (pretty () file)
+  pretty _ (ETarget   tgt ) = "target"   <> parens (pretty () tgt )
+  pretty _ (ECommands tgt ) = "commands" <> parens (pretty () tgt )
+  pretty isNested (ECompare lhs mRhs)
+    = case mRhs of
+        Nothing        -> B.fromText lhs
+        Just (op, rhs) -> maybeParens $ mconcat
+                          [ B.fromText lhs
+                          , space
+                          , pretty () op
+                          , space
+                          , B.fromText rhs
+                          ]
+    where
+      maybeParens :: Builder -> Builder
+      maybeParens b
+        | isNested  = parens b
+        | otherwise = b
 
 infix 0 #
 (#) :: Block -> Text -> Block
@@ -365,6 +484,10 @@ var .+= tokens = BAssignment $ Assignment var Append tokens Nothing
 
 include :: Text -> Block
 include file = BDirective $ DInclude Normal User file
+
+infix 1 ?==
+(?==) :: Text -> Text -> Expr
+a ?== b = ECompare a (Just (EQ, b))
 
 prettyPrintAST :: Makefile -> TL.Text
 prettyPrintAST = B.toLazyText . pretty 0

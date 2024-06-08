@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedLists #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 module Cabal2Pkg.Generator.Makefile
@@ -6,34 +7,49 @@ module Cabal2Pkg.Generator.Makefile
 
 import Cabal2Pkg.Extractor (PackageMeta(..))
 import Cabal2Pkg.Extractor.Component (ComponentMeta, ComponentType(..), cType, cName, cDeps)
-import Cabal2Pkg.Extractor.Conditional (CondBlock, always)
+import Cabal2Pkg.Extractor.Conditional
+  ( CondBlock, CondBranch, Condition(..), always, branches, condition, ifTrue, ifFalse )
 import Cabal2Pkg.Extractor.Dependency (DepSet, exeDeps, extLibDeps, libDeps, pkgConfDeps)
 import Cabal2Pkg.Extractor.Dependency.Executable (ExeDep(..))
 import Cabal2Pkg.Extractor.Dependency.ExternalLib (ExtLibDep(..))
 import Cabal2Pkg.Extractor.Dependency.Library (LibDep(..))
 import Cabal2Pkg.Extractor.Dependency.PkgConfig (PkgConfDep(..))
+import Data.Data (gmapQl)
+import Data.Generics.Aliases (GenericQ, mkQ)
 import Data.Map qualified as M
 import Data.Set qualified as S
+import Data.List.NonEmpty (NonEmpty((:|)))
 import Data.Maybe (catMaybes)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
 import Distribution.Types.Flag (FlagName)
 import Distribution.Types.Flag qualified as C
+import GHC.Stack (HasCallStack)
 import Language.BMake.AST
-  ( Makefile(..), Block, (#), (.=), (.+=), blank, include, prettyPrintAST )
+  ( Makefile(..), Block(..), Directive(..), (#), (.=), (.+=), blank, include
+  , prettyPrintAST )
+import Language.BMake.AST qualified as AST
 import Lens.Micro ((&), (^.), (.~), to)
 
 
-genMakefile :: PackageMeta -> TL.Text
+genMakefile :: HasCallStack => PackageMeta -> TL.Text
 genMakefile = prettyPrintAST . genAST
 
+anywhere :: GenericQ Bool -> GenericQ Bool
+anywhere q = go
+  where
+    go :: GenericQ Bool
+    go x
+      | q x       = True
+      | otherwise = gmapQl (||) False go x
 
-genAST :: PackageMeta -> Makefile
+genAST :: HasCallStack => PackageMeta -> Makefile
 genAST meta
   = mconcat [ header
             , toolsAndConfigArgs
             , maybeUnrestrictDeps
+            , maybePrefs
             , mconcat $ genComponentAST <$> comps'
             , footer
             ]
@@ -69,6 +85,25 @@ genAST meta
         else Makefile [ "HASKELL_UNRESTRICT_DEPENDENCIES" .+= S.toList (unrestrict meta)
                       , blank
                       ]
+
+    -- If any of the conditionals depend of variables defined in
+    -- "../../mk/bsd.fast.prefs.mk", include it here.
+    maybePrefs :: Makefile
+    maybePrefs
+      | anywhere go meta = Makefile [ include "../../mk/bsd.fast.prefs.mk"
+                                    , blank
+                                    ]
+      | otherwise        = mempty
+      where
+        go :: GenericQ Bool
+        go = mkQ False needsPrefs'
+
+        needsPrefs' :: Condition -> Bool
+        needsPrefs' (Literal _) = False
+        needsPrefs' (Not     _) = False
+        needsPrefs' (Or    _ _) = False
+        needsPrefs' (And   _ _) = False
+        needsPrefs' (Expr  _ b) = b
 
     -- The top-level USE_TOOLS. This exists only when we have just one
     -- component and at least one unconditional pkg-config dependency or an
@@ -123,16 +158,16 @@ genAST meta
              , include "../../mk/bsd.pkg.mk"
              ]
 
-    genComponentAST :: ComponentMeta -> Makefile
+    genComponentAST :: HasCallStack => ComponentMeta -> Makefile
     genComponentAST
       | length (components meta) == 1 = genSingleComponentAST
       | otherwise                     = genMultiComponentAST
 
-genSingleComponentAST :: ComponentMeta -> Makefile
+genSingleComponentAST :: HasCallStack => ComponentMeta -> Makefile
 genSingleComponentAST c
   = genDepsAST $ c ^. cDeps
 
-genMultiComponentAST :: ComponentMeta -> Makefile
+genMultiComponentAST :: HasCallStack => ComponentMeta -> Makefile
 genMultiComponentAST c
   = mconcat [ header
             , genDepsAST $ c ^. cDeps
@@ -151,9 +186,49 @@ genMultiComponentAST c
     footer :: Makefile
     footer = Makefile [ blank ]
 
-genDepsAST :: CondBlock DepSet -> Makefile
-genDepsAST b
-  = genDepSetAST (b ^. always) -- FIXME: branches
+genDepsAST :: HasCallStack => CondBlock DepSet -> Makefile
+genDepsAST bl
+  = genDepSetAST (bl ^. always) <>
+    genBranchesAST (bl ^. branches)
+  where
+    genBranchesAST :: HasCallStack => [CondBranch DepSet] -> Makefile
+    genBranchesAST []       = mempty
+    genBranchesAST (br:brs)
+      = Makefile . (: []) . BDirective . DConditional $ genBranchesAST' (br :| brs)
+
+    genBranchesAST' :: HasCallStack => NonEmpty (CondBranch DepSet) -> AST.Conditional
+    genBranchesAST' (br :| brs)
+      = case brs of
+          []     -> clAST
+          (x:xs) -> clAST <> genBranchesAST' (x :| xs)
+      where
+        conAST :: HasCallStack => AST.Condition
+        conAST = genConditionAST $ br ^. condition
+
+        clAST :: AST.Conditional
+        clAST = AST.Conditional
+                { branches = (:| []) $
+                             AST.CondBranch conAST (genDepsAST $ br ^. ifTrue)
+                , else_    = genDepsAST <$> br ^. ifFalse
+                }
+
+genConditionAST :: HasCallStack => Condition -> AST.Condition
+genConditionAST = AST.If . go
+  where
+    go :: HasCallStack => Condition -> AST.LogicalExpr AST.Expr
+    go c = case c of
+             Literal {} -> error ("Literals should have been simplified before "
+                                  <> "translating into bmake AST: " <> show c)
+             Not c'     -> AST.Not (go c')
+             Or  ca cb  -> flatten AST.Or  [go ca, go cb]
+             And ca cb  -> flatten AST.And [go ca, go cb]
+             Expr e _   -> AST.Expr e
+
+    flatten :: HasCallStack
+            => (NonEmpty (AST.LogicalExpr AST.Expr) -> AST.LogicalExpr AST.Expr)
+            -> NonEmpty (AST.LogicalExpr AST.Expr)
+            -> AST.LogicalExpr AST.Expr
+    flatten = error "FIXME"
 
 genDepSetAST :: DepSet -> Makefile
 genDepSetAST ds

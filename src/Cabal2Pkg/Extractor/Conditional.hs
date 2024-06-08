@@ -28,6 +28,8 @@ import Distribution.Types.Version (Version)
 import Distribution.Types.VersionRange (VersionRange, withinRange)
 import GHC.Generics (Generic, Generically(..))
 import GHC.Stack (HasCallStack)
+import Language.BMake.AST ((?==))
+import Language.BMake.AST qualified as AST
 import Lens.Micro ((&), (^.), (%~), (.~))
 import Lens.Micro.TH (makeLenses)
 import UnliftIO.Async (Conc, runConc)
@@ -65,7 +67,9 @@ data Condition
   | Or  !Condition !Condition
   | And !Condition !Condition
   | Expr
-    { expression :: !Text
+    { expression :: !AST.Expr
+      -- |'True' iff the expression depends on variables defined in
+      -- @../../mk/bsd.fast.prefs.mk@
     , needsPrefs :: !Bool
     }
   deriving (Data, Eq, Show)
@@ -95,7 +99,11 @@ extractCondBlock extractContent extractOuter env = go
   where
     go :: HasCallStack => C.CondTree C.ConfVar _c a -> m a'
     go tree
-      = do block <- (garbageCollect <$>) . runConc . forceBlock . simplify $ mkBlock tree
+      = do block <- (floatBranches . garbageCollect <$>)
+                    . runConc
+                    . forceBlock
+                    . simplify
+                    $ mkBlock tree
            pure $ extractOuter (C.condTreeData tree) block
 
     forceBlock :: HasCallStack => CondBlock (Conc m c') -> Conc m (CondBlock c')
@@ -189,39 +197,39 @@ extractOSCond os
     c :: Text -> Condition
     c osName
       = Expr
-        { expression = "${OPSYS} == \"" <> osName <> "\""
+        { expression = "${OPSYS}" ?== "\"" <> osName <> "\""
         , needsPrefs = True
         }
 
 extractArchCond :: C.Arch -> Condition
 extractArchCond arch
   = case arch of
-      C.I386        -> c  "i386"
-      C.X86_64      -> c  "x86_64"
-      C.PPC         -> c  "powerpc"
-      C.PPC64       -> c' "!empty(MACHINE_ARCH:Mpowerpc64*)"
-      C.Sparc       -> c  "sparc"
-      C.Arm         -> c' "!empty(MACHINE_ARCH:M*arm*)"
-      C.AArch64     -> c  "aarch64"
-      C.Mips        -> c' "!empty(MACHINE_ARCH:Mmips*)"
-      C.SH          -> c' "!empty(MACHINE_ARCH:Msh3*)"
-      C.IA64        -> c  "ia64"
+      C.I386        -> c "i386"
+      C.X86_64      -> c "x86_64"
+      C.PPC         -> c "powerpc"
+      C.PPC64       -> Not (c' $ AST.EEmpty "MACHINE_ARCH:Mpowerpc64*")
+      C.Sparc       -> c "sparc"
+      C.Arm         -> Not (c' $ AST.EEmpty "MACHINE_ARCH:M*arm*")
+      C.AArch64     -> c "aarch64"
+      C.Mips        -> Not (c' $ AST.EEmpty "MACHINE_ARCH:Mmips*")
+      C.SH          -> Not (c' $ AST.EEmpty "MACHINE_ARCH:Msh3*")
+      C.IA64        -> c "ia64"
       C.S390        -> Literal False -- not supported by pkgsrc
       C.S390X       -> Literal False
-      C.Alpha       -> c  "alpha"
-      C.Hppa        -> c  "hppa"
+      C.Alpha       -> c "alpha"
+      C.Hppa        -> c "hppa"
       C.Rs6000      -> Literal False
-      C.M68k        -> c  "m68k"
-      C.Vax         -> c  "vax"
+      C.M68k        -> c "m68k"
+      C.Vax         -> c "vax"
       C.JavaScript  -> Literal False
       C.Wasm32      -> Literal False
       C.OtherArch _ -> Literal False
   where
     c :: Text -> Condition
     c archName
-      = c' $ "${MACHINE_ARCH} == \"" <> archName <> "\""
+      = c' $ "${MACHINE_ARCH}" ?== "\"" <> archName <> "\""
 
-    c' :: Text -> Condition
+    c' :: AST.Expr -> Condition
     c' expr
       = Expr
         { expression = expr
@@ -244,6 +252,26 @@ instance Semigroup a => Simplifiable (CondBlock a) where
                Literal False -> maybe bl (bl <>) (br' ^. ifFalse)
                _             -> bl & branches %~ (<> [br'])
 
+-- |For each branch in a 'CondBlock', see if its 'ifFalse' branch has an
+-- empty 'always' part. If that's the case we can merge the branch to the
+-- parent block.
+floatBranches :: forall a. (Eq a, Monoid a) => CondBlock a -> CondBlock a
+floatBranches block
+  = foldl' go (block & branches .~ []) (block ^. branches)
+  where
+    go :: CondBlock a -> CondBranch a -> CondBlock a
+    go bl br
+      = case br ^. ifFalse of
+          Nothing -> bl & branches %~ (<> [br])
+          Just bl'
+            | bl' ^. always == mempty
+                -> let br'  = br & ifFalse .~ Nothing
+                       bl'' = floatBranches bl'
+                   in
+                     bl & branches %~ (<> (br' : bl'' ^. branches))
+            | otherwise
+                -> bl & branches %~ (<> [br])
+
 instance (Eq a, Monoid a) => GarbageCollectable (CondBlock a) where
   garbageCollect block
     = simplify $ block & branches %~ (garbageCollect <$>)
@@ -264,6 +292,7 @@ instance Semigroup a => Simplifiable (CondBranch a) where
 -- deferred monadic computations. We can not test if @'Monad' m => m a@ is
 -- empty just because @a@ is 'Eq' and 'Monoid', without forcing the
 -- computation.
+
 instance (Eq a, Monoid a) => GarbageCollectable (CondBranch a) where
   garbageCollect br
     = let c = br ^. condition
