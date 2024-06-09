@@ -19,6 +19,7 @@ import Data.Generics.Aliases (GenericQ, mkQ)
 import Data.Map qualified as M
 import Data.Set qualified as S
 import Data.List.NonEmpty (NonEmpty((:|)))
+import Data.List.NonEmpty qualified as NE
 import Data.Maybe (catMaybes)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -220,15 +221,38 @@ genConditionAST = AST.If . go
              Literal {} -> error ("Literals should have been simplified before "
                                   <> "translating into bmake AST: " <> show c)
              Not c'     -> AST.Not (go c')
-             Or  ca cb  -> flatten AST.Or  [go ca, go cb]
-             And ca cb  -> flatten AST.And [go ca, go cb]
+             Or  ca cb  -> flattenExpr $ AST.Or  [go ca, go cb]
+             And ca cb  -> flattenExpr $ AST.And [go ca, go cb]
              Expr e _   -> AST.Expr e
 
-    flatten :: HasCallStack
-            => (NonEmpty (AST.LogicalExpr AST.Expr) -> AST.LogicalExpr AST.Expr)
-            -> NonEmpty (AST.LogicalExpr AST.Expr)
-            -> AST.LogicalExpr AST.Expr
-    flatten = error "FIXME"
+-- |For each sub-expression in 'Or' or 'And', if it's also 'Or' or 'And'
+-- then merge it with the parent. That is, transform @a || (b || c)@ into @a
+-- || b || c@.
+flattenExpr :: HasCallStack => AST.LogicalExpr a -> AST.LogicalExpr a
+flattenExpr e@(AST.Not _ ) = e
+flattenExpr   (AST.Or  es) = flattenOr  es
+flattenExpr   (AST.And es) = flattenAnd es
+flattenExpr e@(AST.Expr _) = e
+
+flattenOr :: (HasCallStack, Foldable f) => f (AST.LogicalExpr a) -> AST.LogicalExpr a
+flattenOr = AST.Or . NE.fromList . foldr go []
+  where
+    go e es
+      = case flattenExpr e of
+          AST.Not _  -> e : es
+          AST.Or  es'-> NE.toList es' <> es
+          AST.And _  -> e : es
+          AST.Expr _ -> e : es
+
+flattenAnd :: (HasCallStack, Foldable f) => f (AST.LogicalExpr a) -> AST.LogicalExpr a
+flattenAnd = AST.And . NE.fromList . foldr go []
+  where
+    go e es
+      = case flattenExpr e of
+          AST.Not _  -> e : es
+          AST.Or  _  -> e : es
+          AST.And es'-> NE.toList es' <> es
+          AST.Expr _ -> e : es
 
 genDepSetAST :: DepSet -> Makefile
 genDepSetAST ds
