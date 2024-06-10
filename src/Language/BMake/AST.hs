@@ -25,6 +25,7 @@ module Language.BMake.AST
   , LogicalExpr(..)
   , RelationalOp(..)
   , Expr(..)
+  , ForLoop(..)
 
     -- * Construction
   , (#)
@@ -264,7 +265,7 @@ data Directive
   | DUnexportEnv ![Variable]       -- ^@.unexport-env VARIABLE ...@
   | DWarning     !Text             -- ^@.warning MESSAGE@
   | DConditional !Conditional      -- ^@.if@ and its families
-  | DFor         ![Variable] !Text -- ^@.for@
+  | DFor         !ForLoop          -- ^@.for@
   deriving (Data, Show, Eq)
 
 instance Pretty Directive where
@@ -285,7 +286,7 @@ instance Pretty Directive where
              DUnexportEnv vars      -> dot <> "unexport-env"    <> pretty () vars
              DWarning     msg       -> dot <> "warning "        <> B.fromText msg
              DConditional cond      -> pprConditional cond
-             DFor         vars expr -> error ("FIXME: .for " <> show vars <> " in " <> show expr)
+             DFor         for       -> pretty depth for
 
       dot :: Builder
       dot = dotSpace depth
@@ -362,6 +363,9 @@ data CondBranch = CondBranch !Condition !Makefile
   deriving (Data, Show, Eq)
 
 instance Pretty CondBranch where
+  -- |The 'Bool' value indicates whether the branch is the first one,
+  -- e.g. @.if@ as opposed to @.elif@. The 'Int' value represents the
+  -- current depth of nested directives.
   type Context CondBranch = (Bool, Int)
   pretty ctx@(_, depth) (CondBranch cond m)
     = mconcat [ pretty ctx cond
@@ -465,6 +469,24 @@ instance Pretty Expr where
       maybeParens b
         | isNested  = parens b
         | otherwise = b
+
+data ForLoop = ForLoop ![Variable] !Text !Makefile
+  deriving (Data, Show, Eq)
+
+instance Pretty ForLoop where
+  -- |The current depth of nested directives.
+  type Context ForLoop = Int
+  pretty depth (ForLoop vars expr body)
+    = mconcat [ dotSpace depth
+              , "for "
+              , pretty () vars
+              , " in "
+              , pretty () expr
+              , newline
+              , pretty (depth + 1) body
+              , dotSpace depth
+              , "endfor"
+              ]
 
 infix 0 #
 (#) :: Block -> Text -> Block
