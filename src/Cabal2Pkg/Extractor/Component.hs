@@ -47,13 +47,13 @@ data ComponentMeta = ComponentMeta
   , _cName :: !Text
   , _cDeps :: !(CondBlock DepSet)
   }
-  deriving (Data, Show)
+  deriving (Data, Eq, Show)
 
 data ComponentType
   = Library
   | ForeignLib
   | Executable
-  deriving (Data, Show)
+  deriving (Data, Eq, Show)
 
 makeLenses ''ComponentMeta
 

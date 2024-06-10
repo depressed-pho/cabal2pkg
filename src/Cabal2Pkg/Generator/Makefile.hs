@@ -24,6 +24,7 @@ import Data.Maybe (catMaybes)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
+import Distribution.Pretty (prettyShow)
 import Distribution.Types.Flag (FlagName)
 import Distribution.Types.Flag qualified as C
 import GHC.Stack (HasCallStack)
@@ -46,7 +47,7 @@ anywhere q = go
       | otherwise = gmapQl (||) False go x
 
 genAST :: HasCallStack => PackageMeta -> Makefile
-genAST meta
+genAST pm
   = mconcat [ header
             , toolsAndConfigArgs
             , maybeUnrestrictDeps
@@ -59,14 +60,20 @@ genAST meta
     header = Makefile
              [ blank # "$NetBSD$"
              , blank
-             , "DISTNAME"   .= pure (distName meta)
-             , "CATEGORIES" .= categories meta
+             , "DISTNAME"   .= pure distName
+             , "CATEGORIES" .= categories pm
              , blank
-             , "MAINTAINER" .= pure (maintainer meta)
-             , "COMMENT"    .= pure (comment meta)
-             , "LICENSE"    .= pure (license meta)
+             , "MAINTAINER" .= pure (maintainer pm)
+             , "COMMENT"    .= pure (comment pm)
+             , "LICENSE"    .= pure (license pm)
              , blank
              ]
+
+    distName :: Text
+    distName = mconcat [ distBase pm
+                       , "-"
+                       , T.pack . prettyShow . distVersion $ pm
+                       ]
 
     toolsAndConfigArgs :: Makefile
     toolsAndConfigArgs
@@ -81,9 +88,9 @@ genAST meta
     -- conditional tree.
     maybeUnrestrictDeps :: Makefile
     maybeUnrestrictDeps
-      = if S.null (unrestrict meta)
+      = if S.null (unrestrict pm)
         then mempty
-        else Makefile [ "HASKELL_UNRESTRICT_DEPENDENCIES" .+= S.toList (unrestrict meta)
+        else Makefile [ "HASKELL_UNRESTRICT_DEPENDENCIES" .+= S.toList (unrestrict pm)
                       , blank
                       ]
 
@@ -91,10 +98,10 @@ genAST meta
     -- "../../mk/bsd.fast.prefs.mk", include it here.
     maybePrefs :: Makefile
     maybePrefs
-      | anywhere go meta = Makefile [ include "../../mk/bsd.fast.prefs.mk"
-                                    , blank
-                                    ]
-      | otherwise        = mempty
+      | anywhere go pm = Makefile [ include "../../mk/bsd.fast.prefs.mk"
+                                  , blank
+                                  ]
+      | otherwise      = mempty
       where
         go :: GenericQ Bool
         go = mkQ False needsPrefs'
@@ -111,7 +118,7 @@ genAST meta
     -- unconditional tool dependency.
     useTools :: Makefile
     useTools
-      = case components meta of
+      = case components pm of
           (c:[]) ->
             let exeDeps'      = addPkgConf $ c ^. cDeps . always . exeDeps
                 addPkgConf xs
@@ -127,12 +134,12 @@ genAST meta
 
     configArgs :: Makefile
     configArgs
-      | M.null (flags meta) = mempty
+      | M.null (flags pm) = mempty
       | otherwise
           = Makefile [ "CONFIGURE_ARGS" .+= flags' ]
       where
         flags' :: [Text]
-        flags' = go <$> M.toList (flags meta)
+        flags' = go <$> M.toList (flags pm)
 
         go :: (FlagName, Bool) -> Text
         go (flag, True ) = "-f +" <> f2t flag
@@ -145,7 +152,7 @@ genAST meta
     -- dependencies because we move them just below the header.
     comps' :: [ComponentMeta]
     comps'
-      = case components meta of
+      = case components pm of
           (c:[]) ->
             let c' = c & cDeps . always . exeDeps .~ []
             in
@@ -161,35 +168,35 @@ genAST meta
 
     genComponentAST :: HasCallStack => ComponentMeta -> Makefile
     genComponentAST
-      | length (components meta) == 1 = genSingleComponentAST
-      | otherwise                     = genMultiComponentAST
+      | length (components pm) == 1 = genSingleComponentAST pm
+      | otherwise                   = genMultiComponentAST  pm
 
-genSingleComponentAST :: HasCallStack => ComponentMeta -> Makefile
-genSingleComponentAST c
-  = genDepsAST $ c ^. cDeps
+genSingleComponentAST :: HasCallStack => PackageMeta -> ComponentMeta -> Makefile
+genSingleComponentAST pm cm
+  = genDepsAST pm cm (cm ^. cDeps)
 
-genMultiComponentAST :: HasCallStack => ComponentMeta -> Makefile
-genMultiComponentAST c
+genMultiComponentAST :: HasCallStack => PackageMeta -> ComponentMeta -> Makefile
+genMultiComponentAST pm cm
   = mconcat [ header
-            , genDepsAST $ c ^. cDeps
+            , genDepsAST pm cm (cm ^. cDeps)
             , footer
             ]
   where
     header :: Makefile
     header
-      = let ty = case c ^. cType of
+      = let ty = case cm ^. cType of
                    Library    -> "lib"
                    ForeignLib -> "flib"
                    Executable -> "exe"
         in
-          Makefile [ blank # ty <> ":" <> (c ^. cName) ]
+          Makefile [ blank # ty <> ":" <> (cm ^. cName) ]
 
     footer :: Makefile
     footer = Makefile [ blank ]
 
-genDepsAST :: HasCallStack => CondBlock DepSet -> Makefile
-genDepsAST bl
-  = genDepSetAST (bl ^. always) <>
+genDepsAST :: HasCallStack => PackageMeta -> ComponentMeta -> CondBlock DepSet -> Makefile
+genDepsAST pm cm bl
+  = genDepSetAST pm cm (bl ^. always) <>
     genBranchesAST (bl ^. branches)
   where
     genBranchesAST :: HasCallStack => [CondBranch DepSet] -> Makefile
@@ -209,8 +216,8 @@ genDepsAST bl
         clAST :: AST.Conditional
         clAST = AST.Conditional
                 { branches = (:| []) $
-                             AST.CondBranch conAST (genDepsAST $ br ^. ifTrue)
-                , else_    = genDepsAST <$> br ^. ifFalse
+                             AST.CondBranch conAST (genDepsAST pm cm (br ^. ifTrue))
+                , else_    = genDepsAST pm cm <$> br ^. ifFalse
                 }
 
 genConditionAST :: HasCallStack => Condition -> AST.Condition
@@ -254,12 +261,12 @@ flattenAnd = AST.And . NE.fromList . foldr go []
           AST.And es'-> NE.toList es' <> es
           AST.Expr _ -> e : es
 
-genDepSetAST :: DepSet -> Makefile
-genDepSetAST ds
+genDepSetAST :: PackageMeta -> ComponentMeta -> DepSet -> Makefile
+genDepSetAST pm cm ds
   = mconcat [ genExeDepsAST $ ds ^. exeDeps
-            , mconcat $ genExtLibDepAST  <$> ds ^. extLibDeps
-            , mconcat $ genLibDepAST     <$> ds ^. libDeps
-            , mconcat $ genPkgConfDepAST <$> ds ^. pkgConfDeps
+            , mconcat $ genExtLibDepAST    <$> ds ^. extLibDeps
+            , mconcat $ genLibDepAST pm cm <$> ds ^. libDeps
+            , mconcat $ genPkgConfDepAST   <$> ds ^. pkgConfDeps
             ]
 
 genExeDepsAST :: [ExeDep] -> Makefile
@@ -290,10 +297,22 @@ genExtLibDepAST :: ExtLibDep -> Makefile
 genExtLibDepAST (ExtLibDep name)
   = Makefile [ blank # "TODO: Include buildlink3.mk for lib" <> name ]
 
-genLibDepAST :: LibDep -> Makefile
-genLibDepAST (KnownLib   {..})
-  = Makefile [ include $ "../../" <> pkgPath <> "/buildlink3.mk" ]
-genLibDepAST (UnknownLib {..})
+genLibDepAST :: PackageMeta -> ComponentMeta -> LibDep -> Makefile
+genLibDepAST pm cm (KnownLib {..})
+  | (cm ^. cType) == Executable &&
+    pkgPath == "devel/hs-optparse-applicative"
+      -- A special case for executables depending on
+      -- optparse-applicative. Most of the time, if not always, their
+      -- command-line interface is built on top of optparse-applicative and
+      -- thus support generating shell completion scripts.
+      = let exeDecl = if (cm ^. cName) == distBase pm
+                      then mempty
+                      else Makefile [ "OPTPARSE_APPLICATIVE_EXECUTABLES" .+= [cm ^. cName] ]
+        in
+          exeDecl <> Makefile [ include $ "../../" <> pkgPath <> "/application.mk" ]
+  | otherwise
+      = Makefile [ include $ "../../" <> pkgPath <> "/buildlink3.mk" ]
+genLibDepAST _ _ (UnknownLib {..})
   = Makefile [ blank # "TODO: Include buildlink3.mk for " <> name ]
 
 genPkgConfDepAST :: PkgConfDep -> Makefile
