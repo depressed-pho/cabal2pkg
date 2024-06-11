@@ -5,7 +5,6 @@ module Cabal2Pkg.Cabal
   ) where
 
 import Cabal2Pkg.CmdLine (CLI, err, warn)
-import Cabal2Pkg.Utils ()
 import Control.Monad.Catch (MonadThrow)
 import Control.Monad.Trans.Resource (MonadResource)
 import Data.ByteString (ByteString)

@@ -1,8 +1,6 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
 {-# LANGUAGE CPP #-}
-module Cabal2Pkg.Utils
-  (
-  ) where
+module System.OsPath.IsString () where
 
 import Data.String (IsString(..))
 import GHC.Stack (HasCallStack)

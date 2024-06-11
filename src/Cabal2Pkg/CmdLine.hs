@@ -31,7 +31,6 @@ module Cabal2Pkg.CmdLine
   ) where
 
 import Cabal2Pkg.Static (makeQ)
-import Cabal2Pkg.Utils ()
 import Control.Applicative ((<|>), many)
 import Control.Concurrent.Deferred (Deferred, defer, force)
 import Control.Exception.Safe (Exception(..), catch, throw)
@@ -76,6 +75,7 @@ import System.Exit (ExitCode(ExitFailure), exitWith)
 import System.IO (stderr, utf8, utf16le)
 import System.OsPath qualified as OP
 import System.OsPath ((</>), OsPath)
+import System.OsPath.IsString ()
 import Text.Show.Pretty (ppShow)
 
 
