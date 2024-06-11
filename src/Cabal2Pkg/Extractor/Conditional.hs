@@ -17,6 +17,7 @@ import Control.Monad.IO.Unlift (MonadUnliftIO)
 import Data.Data (Data)
 import Data.Foldable (foldl')
 import Data.Map.Strict qualified as M
+import Data.Maybe (isNothing)
 import Data.Text (Text)
 import Distribution.Compiler qualified as C
 import Distribution.System qualified as C
@@ -114,9 +115,8 @@ extractCondBlock extractContent extractOuter env = go
 
     forceBranch :: HasCallStack => CondBranch (Conc m c') -> Conc m (CondBranch c')
     forceBranch br
-      = CondBranch
-        <$> pure (br ^. condition)
-        <*> forceBlock (br ^. ifTrue)
+      = CondBranch (br ^. condition)
+        <$> forceBlock (br ^. ifTrue)
         <*> traverse forceBlock (br ^. ifFalse)
 
     mkBlock :: HasCallStack
@@ -301,7 +301,7 @@ instance (Eq a, Monoid a) => GarbageCollectable (CondBranch a) where
       in
         -- These comparisons regarding Maybe aren't beautiful. Can we do
         -- anything better?
-        if t == mempty && (f == Nothing || f == Just mempty)
+        if t == mempty && (isNothing f || f == Just mempty)
         then CondBranch (Literal False) t f
         else CondBranch c t f
 

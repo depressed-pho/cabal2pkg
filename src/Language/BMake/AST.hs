@@ -114,7 +114,7 @@ instance Pretty Comment where
     = "# " <> B.fromText c
 
 pprOptionalComment :: Maybe Comment -> Builder
-pprOptionalComment = maybe mempty ((space <>) . pretty ())
+pprOptionalComment = foldMap ((space <>) . pretty ())
 
 data Block
   = BBlank      !Blank
@@ -138,12 +138,12 @@ instance Pretty Target where
     = B.fromText path
 
 -- |A blank line.
-newtype Blank = Blank { bComment :: (Maybe Comment) }
+newtype Blank = Blank { bComment :: Maybe Comment }
   deriving (Data, Show, Eq)
 
 instance Pretty Blank where
   pretty _ (Blank c)
-    = maybe mempty (pretty ()) c <> newline
+    = foldMap (pretty ()) c <> newline
 
 data Assignment
   = Assignment
@@ -412,8 +412,8 @@ instance Pretty a => Pretty (LogicalExpr a) where
   -- |Whether the expression is a nested one.
   type Context (LogicalExpr a) = (Bool, Context a)
   pretty (_, ctx) (Not e ) = B.singleton '!' <> pretty (True, ctx) e
-  pretty (_, ctx) (Or  es) = sconcat $ NE.intersperse " || " $ pretty (True, ctx) <$> es
-  pretty (_, ctx) (And es) = sconcat $ NE.intersperse " && " $ pretty (True, ctx) <$> es
+  pretty (_, ctx) (Or  es) = sconcat . NE.intersperse " || " $ pretty (True, ctx) <$> es
+  pretty (_, ctx) (And es) = sconcat . NE.intersperse " && " $ pretty (True, ctx) <$> es
   pretty (isNested, ctx) (Expr e)
     | isNested  = parens $ pretty ctx e
     | otherwise =          pretty ctx e

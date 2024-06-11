@@ -61,7 +61,7 @@ extractDeps pkg bi
     aggregateEach = foldr go ([], mempty)
       where
         go (a, b) (as, bs) = ( maybe as (: as) a
-                             , maybe bs (flip S.insert bs) b
+                             , maybe bs (`S.insert` bs) b
                              )
 
     execs :: Conc CLI ([ExeDep], Set Text)

@@ -21,6 +21,7 @@ import Control.Applicative (asum)
 import Control.Concurrent.Deferred (Deferred, defer, force)
 import Control.Concurrent.STM (atomically)
 import Control.Exception.Safe (MonadThrow, throw)
+import Control.Monad ((<=<), forM_)
 import Control.Monad.IO.Unlift (MonadIO, MonadUnliftIO, liftIO)
 import Data.ByteString.Lazy qualified as BL
 import Data.CaseInsensitive (CI)
@@ -43,9 +44,9 @@ import System.Process.Typed qualified as PT
 import UnliftIO.Async (mapConcurrently)
 
 
-data SrcDb m
+newtype SrcDb m
   = SrcDb
-    { categories :: !(HashMap Text (Deferred m (Category m)))
+    { categories :: HashMap Text (Deferred m (Category m))
     }
 
 -- |A category of pkgsrc packages. It has nothing to do with category
@@ -80,7 +81,7 @@ createSrcDb makePath root = SrcDb <$> go
     deferCat :: (MonadThrow m, MonadUnliftIO m) => OsString -> m (Text, Deferred m (Category m))
     deferCat catName
       = (,) <$> (T.pack <$> OP.decodeUtf catName)
-            <*> (defer $ mkCat catName)
+            <*> defer (mkCat catName)
 
     mkCat :: (MonadThrow m, MonadUnliftIO m) => OsString -> m (Category m)
     mkCat catName
@@ -89,6 +90,7 @@ createSrcDb makePath root = SrcDb <$> go
              { packages   = pkgs
              , packagesCI = HM.mapKeys CI.mk pkgs
              }
+{-# ANN createSrcDb ("HLint: ignore Functor law" :: String) #-}
 
 os :: String -> OsString
 os = either (error . show) id . OP.encodeUtf
@@ -139,7 +141,7 @@ scanPkgs makePath root catName
     deferPkg :: OsString -> m (Text, Deferred m (Package m))
     deferPkg dirName
       = (,) <$> (T.pack <$> OP.decodeUtf dirName)
-            <*> (defer $ mkPkg dirName)
+            <*> defer (mkPkg dirName)
 
     mkPkg :: OsString -> m (Package m)
     mkPkg dirName
@@ -165,8 +167,8 @@ scanPkgs makePath root catName
       = do make' <- OP.decodeUtf makePath
            dir'  <- OP.decodeUtf dirPath
            let conf = PT.setStdin PT.createPipe
-                    $ PT.setStdout PT.byteStringOutput
-                    $ PT.setWorkingDir dir'
+                    . PT.setStdout PT.byteStringOutput
+                    . PT.setWorkingDir dir'
                     $ PT.proc make' ["-f", "-", "-f", "Makefile", "x"]
            PT.withProcessWait_ conf $ \p ->
              liftIO $
@@ -174,7 +176,7 @@ scanPkgs makePath root catName
                     vars' = HS.toList vars
                 U8.hPutStrLn stdin ".PHONY: x"
                 U8.hPutStrLn stdin "x:"
-                flip mapM_ vars' $ \var ->
+                forM_ vars' $ \var ->
                   do U8.hPutStr stdin "\t@printf '%s\\0' \"${"
                      U8.hPutStr stdin var
                      U8.hPutStrLn stdin "}\""
@@ -184,6 +186,7 @@ scanPkgs makePath root catName
                        =<< atomically (PT.getStdout p)
                 let vals = T.split (== '\0') out
                 pure . HM.fromList $ zip vars' vals
+{-# ANN scanPkgs ("HLint: ignore Functor law" :: String) #-}
 
 -- |Only include directories that has a Makefile.
 filterPkgs :: MonadUnliftIO m => OsPath -> [OsString] -> m [OsString]
@@ -218,7 +221,7 @@ findPackageCommon :: forall m.
                   -> (Category m -> Maybe (Deferred m (Package m)))
                   -> m (Maybe (Package m))
 findPackageCommon (SrcDb {..}) q
-  = asum <$> mapConcurrently ((go =<<) . force) (HM.elems categories)
+  = asum <$> mapConcurrently (go <=< force) (HM.elems categories)
   where
     go :: Category m -> m (Maybe (Package m))
     go = traverse force . q

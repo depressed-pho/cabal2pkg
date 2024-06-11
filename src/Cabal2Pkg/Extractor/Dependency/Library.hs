@@ -1,5 +1,4 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards #-}
 module Cabal2Pkg.Extractor.Dependency.Library
   ( LibDep(..)
   , extractLibDep
@@ -55,7 +54,7 @@ extractLibDep dep
            do m <- findPkgsrcPkg (C.depPkgName dep)
               case m of
                 Just (path, ver) -> pure $ found path ver
-                Nothing          -> pure $ notFound
+                Nothing          -> pure notFound
   where
     name' :: Text
     name' = T.pack . C.unPackageName . C.depPkgName $ dep
@@ -82,13 +81,13 @@ extractLibDep dep
 lookupBundled :: C.InstalledPackageIndex -> C.PackageName -> Maybe Version
 lookupBundled ipi name
   = case C.lookupPackageName ipi name of
-      ((ver, (pkg:_)):_) ->
+      (ver, pkg : _) : _ ->
         -- NOTE: The package database does not have explicit fields
         -- indicating whether the package is bundled with the compiler. For
         -- now we consider packages whose "hs-libraries" field ends with
         -- "-inplace" to be bundled ones, but this is a fragile test.
         case C.hsLibraries pkg of
-          (lib:_)
+          lib : _
             | "-inplace" `isSuffixOf` lib ->
                 Just ver
           _ ->

@@ -9,6 +9,8 @@ module Cabal2Pkg.CmdLine
   , FlagMap
   , Command(..)
   , CommandError(..)
+  , InitOptions(..)
+  , UpdateOptions(..)
 
   , runCLI
   , command
@@ -146,21 +148,42 @@ flagMap = eitherReader f
     fa2Map :: C.FlagAssignment -> FlagMap
     fa2Map = M.fromList . C.unFlagAssignment
 
-
 data Command
-  = Init { initTarballURL :: Text }
-  | Update
+  = Init   !InitOptions
+  | Update !UpdateOptions
+  deriving (Show)
+
+data InitOptions
+  = InitOptions
+    { optOverwrite  :: !Bool
+    , optTarballURL :: !Text
+    }
+  deriving (Show)
+
+data UpdateOptions
+  = UpdateOptions
+    {
+    }
   deriving (Show)
 
 commandP :: Parser Command
 commandP =
   subparser
-  ( OA.command "init" (OA.info initP (progDesc "Create a new pkgsrc package")) <>
+  ( OA.command "init"   (OA.info initP   (progDesc "Create a new pkgsrc package")) <>
     OA.command "update" (OA.info updateP (progDesc "Update an existing pkgsrc package to the latest version"))
   )
   where
-    initP   = Init <$> argument str (metavar "TARBALL-URL")
-    updateP = pure Update
+    initP :: Parser Command
+    initP = (Init .) . InitOptions
+            <$> switch
+                ( long "overwrite" <>
+                  short 'w' <>
+                  help "Overwrite existing files"
+                )
+            <*> argument str (metavar "TARBALL-URL")
+
+    updateP :: Parser Command
+    updateP = pure $ Update UpdateOptions
 
 
 parseOptions :: IO Options
@@ -207,7 +230,7 @@ initialCtx opts
 mkProgDb :: CLI ProgramDb
 mkProgDb
   = do debug "Configuring program database..."
-       ghcBin      <- OP.decodeUtf =<< (optGHCBin <$> options)
+       ghcBin      <- OP.decodeUtf . optGHCBin =<< options
        (_, _, db0) <- liftIO $
                       GHC.configure silent (Just ghcBin) Nothing C.defaultProgramDb
        db1         <- liftIO $
@@ -235,8 +258,9 @@ mkSrcDb
        createSrcDb make root
 
 
-data CommandError = CommandError { message :: Text }
-  deriving (Show, Exception)
+newtype CommandError = CommandError { message :: Text }
+  deriving Show
+  deriving anyclass Exception
 
 newtype CLI a = CLI { unCLI :: ReaderT Context (ResourceT IO) a }
   deriving newtype ( Applicative
@@ -283,7 +307,7 @@ pkgPath = optPkgPath <$> options
 
 -- |@-d devel/foo@ => @devel@
 category :: CLI Text
-category = toText =<< OP.takeFileName . OP.takeDirectory <$> pkgPath
+category = toText . OP.takeFileName . OP.takeDirectory =<< pkgPath
   where
     toText :: MonadThrow m => OsPath -> m Text
     toText = (T.pack <$>) . OP.decodeUtf
@@ -298,7 +322,7 @@ pkgFlags :: CLI FlagMap
 pkgFlags = optPkgFlags <$> options
 
 progDb :: CLI ProgramDb
-progDb = (CLI $ asks ctxProgDb) >>= force
+progDb = CLI (asks ctxProgDb) >>= force
 
 ghcVersion :: CLI Version
 ghcVersion
@@ -309,15 +333,15 @@ ghcVersion
        pure ver
 
 installedPkgs :: CLI InstalledPackageIndex
-installedPkgs = (CLI $ asks ctxIPI) >>= force
+installedPkgs = CLI (asks ctxIPI) >>= force
 
 srcDb :: CLI (SrcDb CLI)
-srcDb = (CLI $ asks ctxSrcDb) >>= force
+srcDb = CLI (asks ctxSrcDb) >>= force
 
 debug :: Text -> CLI ()
 debug msg =
   do d <- optDebug <$> options
-     when d $ liftIO $
+     when d . liftIO $
        do pn <- T.pack <$> getProgName
           hPutStrLn stderr (pn <> ": DEBUG: " <> T.strip msg)
 

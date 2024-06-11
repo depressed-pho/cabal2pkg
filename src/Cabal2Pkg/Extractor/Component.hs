@@ -61,10 +61,10 @@ makeLenses ''ComponentMeta
 extractComponents :: GenericPackageDescription -> CLI ([ComponentMeta], Set Text)
 extractComponents gpd
   = do env     <- extractEnv
-       lib     <- aggregateEach <$> traverse (extractLib    env) (GPD.condLibrary gpd)
-       subLibs <- aggregateEach <$> traverse (extractLib    env) (snd <$> GPD.condSubLibraries gpd)
-       frnLibs <- aggregateEach <$> traverse (extractFrnLib env) (snd <$> GPD.condForeignLibs  gpd)
-       execs   <- aggregateEach <$> traverse (extractExe    env) (snd <$> GPD.condExecutables  gpd)
+       lib     <- aggregateEach <$> traverse (extractLib    env      ) (GPD.condLibrary      gpd)
+       subLibs <- aggregateEach <$> traverse (extractLib    env . snd) (GPD.condSubLibraries gpd)
+       frnLibs <- aggregateEach <$> traverse (extractFrnLib env . snd) (GPD.condForeignLibs  gpd)
+       execs   <- aggregateEach <$> traverse (extractExe    env . snd) (GPD.condExecutables  gpd)
        pure $ aggregateAll
          [ first maybeToList lib
          , subLibs

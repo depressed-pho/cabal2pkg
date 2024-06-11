@@ -20,7 +20,7 @@ import Data.Map qualified as M
 import Data.Set qualified as S
 import Data.List.NonEmpty (NonEmpty((:|)))
 import Data.List.NonEmpty qualified as NE
-import Data.Maybe (catMaybes)
+import Data.Maybe (mapMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
@@ -119,7 +119,7 @@ genAST pm
     useTools :: Makefile
     useTools
       = case components pm of
-          (c:[]) ->
+          [c] ->
             let exeDeps'      = addPkgConf $ c ^. cDeps . always . exeDeps
                 addPkgConf xs
                   | c ^. cDeps . always . pkgConfDeps . to (not . null)
@@ -153,7 +153,7 @@ genAST pm
     comps' :: [ComponentMeta]
     comps'
       = case components pm of
-          (c:[]) ->
+          [c] ->
             let c' = c & cDeps . always . exeDeps .~ []
             in
               [c']
@@ -275,13 +275,13 @@ genExeDepsAST es
   | otherwise                  = Makefile [ maybeUnknown $ "USE_TOOLS" .+= known ]
   where
     known :: [Text]
-    known = catMaybes $ go <$> es
+    known = mapMaybe go es
       where
         go (KnownExe   {..}) = Just name
         go (UnknownExe {  }) = Nothing
 
     unknown :: [Text]
-    unknown = catMaybes $ go <$> es
+    unknown = mapMaybe go es
       where
         go (KnownExe   {  }) = Nothing
         go (UnknownExe {..}) = Just name
@@ -289,9 +289,9 @@ genExeDepsAST es
     maybeUnknown :: Block -> Block
     maybeUnknown bl
       = case unknown of
-          []     -> bl
-          (x:[]) -> bl # "TODO: unknown tool: " <> x
-          xs     -> bl # "TODO: unknown tools: " <> T.intercalate ", " xs
+          []  -> bl
+          [x] -> bl # "TODO: unknown tool: " <> x
+          xs  -> bl # "TODO: unknown tools: " <> T.intercalate ", " xs
 
 genExtLibDepAST :: ExtLibDep -> Makefile
 genExtLibDepAST (ExtLibDep name)

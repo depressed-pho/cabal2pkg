@@ -11,10 +11,10 @@ import Data.Text qualified as T
 -- |Dependency on a non-Haskell library. In pkgsrc we declare these
 -- dependencies by including a corresponding @buildlink3.mk@ but it's
 -- impossible to automatically infer the path to it.
-data ExtLibDep
+newtype ExtLibDep
   = ExtLibDep
     { -- |The name of an external library, such as @"z"@ for @libz@.
-      name :: !Text
+      name :: Text
     }
   deriving (Data, Eq, Show)
 

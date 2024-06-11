@@ -13,10 +13,10 @@ import Distribution.Types.PkgconfigName qualified as C
 -- |Dependency on an external pkg-config library. In pkgsrc we declare
 -- these dependencies by including a corresponding @buildlink3.mk@ but it's
 -- impossible to automatically infer the path to it.
-data PkgConfDep
+newtype PkgConfDep
   = PkgConfDep
     { -- |The name of a pkg-config package, such as @"cups"@.
-      name :: !Text
+      name :: Text
     }
   deriving (Data, Eq, Show)
 

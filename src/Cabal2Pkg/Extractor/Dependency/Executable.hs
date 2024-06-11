@@ -47,7 +47,7 @@ extractExeDep (C.ExeDependency pkgName _ verRange)
            do m <- findPkgsrcPkg pkgName
               case m of
                 Just (name, ver) -> pure $ found name ver
-                Nothing          -> pure $ notFound
+                Nothing          -> pure notFound
   where
     name' :: Text
     name' = T.pack . C.unPackageName $ pkgName
@@ -75,8 +75,7 @@ lookupBundled :: C.ProgramDb -> C.PackageName -> Maybe Version
 lookupBundled progs pkgName
   = do prog  <- C.lookupKnownProgram (C.unPackageName pkgName) progs
        prog' <- C.lookupProgram prog progs
-       ver   <- C.programVersion prog'
-       pure ver
+       C.programVersion prog'
 
 -- |Search for a pkgsrc package case-insensitively, both with and without
 -- the @hs-@ prefix. Whether it includes @mk/haskell.mk@ or not is
