@@ -1,4 +1,4 @@
-module Main where
+module Main (main) where
 
 import Cabal2Pkg.CmdLine (Command(..), command, runCLI)
 import Cabal2Pkg.Command.Init qualified as Init

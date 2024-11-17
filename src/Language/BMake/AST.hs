@@ -1,4 +1,4 @@
-{-# LANGUAGE GeneralisedNewtypeDeriving #-}
+{-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -101,14 +101,11 @@ maybeParens :: Bool -> Builder -> Builder
 maybeParens True  = parens
 maybeParens False = id
 
-newtype Makefile = Makefile { blocks :: [Block] }
-  deriving (Data, Show, Eq, Semigroup, Monoid)
-
 type instance Element Makefile = Block
-deriving instance GrowingAppend Makefile
-deriving instance MonoFoldable Makefile
-deriving instance MonoFunctor Makefile
-deriving instance MonoPointed Makefile
+newtype Makefile = Makefile { blocks :: [Block] }
+  deriving stock   (Data, Show, Eq)
+  deriving newtype ( GrowingAppend, MonoFoldable, MonoFunctor, MonoPointed
+                   , Semigroup, Monoid )
 -- NOTE: Can't derive MonoTraversable due to
 -- https://stackoverflow.com/questions/49776924/newtype-deriving-issequence
 
@@ -131,14 +128,15 @@ instance Pretty Makefile where
                            go mempty bs
 
 newtype Comment = Comment Text
-  deriving (Data, Show, Eq, IsString)
+  deriving stock (Data, Show, Eq)
+  deriving newtype IsString
 
 instance Pretty Comment where
   pretty _ (Comment c)
     = "# " <> B.fromText c
 
 pprOptionalComment :: Maybe Comment -> Builder
-pprOptionalComment = foldMap ((space <>) . pretty ())
+pprOptionalComment = foldMap ((tab <>) . pretty ())
 
 data Block
   = BBlank      !Blank
@@ -149,14 +147,16 @@ data Block
   deriving (Data, Show, Eq)
 
 newtype Variable = Variable Text
-  deriving (Data, Show, Eq, IsString)
+  deriving stock (Data, Show, Eq)
+  deriving newtype IsString
 
 instance Pretty Variable where
   pretty _ (Variable name)
     = B.fromText name
 
 newtype Target = Target Text
-  deriving (Data, Show, Eq, IsString)
+  deriving stock (Data, Show, Eq)
+  deriving newtype IsString
 
 instance Pretty Target where
   pretty _ (Target path)
@@ -164,7 +164,7 @@ instance Pretty Target where
 
 -- |A blank line.
 newtype Blank = Blank { bComment :: Maybe Comment }
-  deriving (Data, Show, Eq)
+  deriving stock (Data, Show, Eq)
 
 instance Pretty Blank where
   pretty _ (Blank c)
@@ -195,7 +195,7 @@ instance Pretty Assignment where
               ]
     where
       hasTokens :: Bool
-      hasTokens = any (not . T.null) aTokens
+      hasTokens = (not . all T.null) aTokens
 
       pre :: Builder
       pre = pretty () aVar <> pretty () aType
@@ -338,6 +338,7 @@ instance Pretty Directive where
                   , pprElse else_
                   , dot
                   , "endif"
+                  , pprOptionalComment endComment
                   ]
 
       pprBranches :: NonEmpty CondBranch -> Builder
@@ -371,8 +372,9 @@ data IncLoc
 
 data Conditional
   = Conditional
-    { branches :: !(NonEmpty CondBranch)
-    , else_    :: !(Maybe Makefile) -- ^@.else@
+    { branches   :: !(NonEmpty CondBranch)
+    , else_      :: !(Maybe Makefile) -- ^@.else@
+    , endComment :: !(Maybe Comment)
     }
   deriving (Data, Show, Eq)
 
@@ -516,6 +518,8 @@ infix 0 #
 BBlank      b # c = BBlank      $ b { bComment = Just (Comment c) }
 BAssignment a # c = BAssignment $ a { aComment = Just (Comment c) }
 BRule       r # c = BRule       $ r { rComment = Just (Comment c) }
+-- FIXME: These aren't quite correct. We should turn (#) into a method in
+-- some class.
 BDirective  d # _ = BDirective d
 BUnindent   b # _ = BUnindent b
 

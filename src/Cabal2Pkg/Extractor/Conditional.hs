@@ -110,7 +110,7 @@ extractCondBlock extractContent extractOuter env = go
     forceBlock :: HasCallStack => CondBlock (Conc m c') -> Conc m (CondBlock c')
     forceBlock bl
       = CondBlock
-        <$> (bl ^. always)
+        <$> bl ^. always
         <*> traverse forceBranch (bl ^. branches)
 
     forceBranch :: HasCallStack => CondBranch (Conc m c') -> Conc m (CondBranch c')
@@ -248,7 +248,7 @@ instance Semigroup a => Simplifiable (CondBlock a) where
       go bl br
         = let br' = simplify br
           in case simplify $ br' ^. condition of
-               Literal True  -> bl <> (br' ^. ifTrue)
+               Literal True  -> bl <> br' ^. ifTrue
                Literal False -> maybe bl (bl <>) (br' ^. ifFalse)
                _             -> bl & branches %~ (<> [br'])
 

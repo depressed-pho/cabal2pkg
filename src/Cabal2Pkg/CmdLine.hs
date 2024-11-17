@@ -259,7 +259,7 @@ mkSrcDb
 
 
 newtype CommandError = CommandError { message :: Text }
-  deriving Show
+  deriving stock    Show
   deriving anyclass Exception
 
 newtype CLI a = CLI { unCLI :: ReaderT Context (ResourceT IO) a }

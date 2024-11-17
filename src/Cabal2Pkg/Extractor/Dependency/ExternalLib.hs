@@ -1,3 +1,4 @@
+{-# LANGUAGE DerivingStrategies #-}
 module Cabal2Pkg.Extractor.Dependency.ExternalLib
   ( ExtLibDep(..)
   , extractExtLibDep
@@ -16,7 +17,7 @@ newtype ExtLibDep
     { -- |The name of an external library, such as @"z"@ for @libz@.
       name :: Text
     }
-  deriving (Data, Eq, Show)
+  deriving stock (Data, Eq, Show)
 
 
 extractExtLibDep :: String -> ExtLibDep

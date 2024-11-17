@@ -1,3 +1,4 @@
+{-# LANGUAGE DerivingStrategies #-}
 module Cabal2Pkg.Extractor.Dependency.PkgConfig
   ( PkgConfDep(..)
   , extractPkgConfDep
@@ -18,7 +19,7 @@ newtype PkgConfDep
     { -- |The name of a pkg-config package, such as @"cups"@.
       name :: Text
     }
-  deriving (Data, Eq, Show)
+  deriving stock (Data, Eq, Show)
 
 
 extractPkgConfDep :: C.PkgconfigDependency -> PkgConfDep

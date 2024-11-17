@@ -199,7 +199,7 @@ genMultiComponentAST pm cm
                    ForeignLib -> "flib"
                    Executable -> "exe"
         in
-          Makefile [ blank # ty <> ":" <> (cm ^. cName) ]
+          Makefile [ blank # ty <> ":" <> cm ^. cName ]
 
     footer :: Makefile
     footer = Makefile [ blank ]
@@ -225,9 +225,10 @@ genDepsAST pm cm bl
 
         clAST :: AST.Conditional
         clAST = AST.Conditional
-                { branches = (:| []) $
-                             AST.CondBranch conAST (genDepsAST pm cm (br ^. ifTrue))
-                , else_    = genDepsAST pm cm <$> br ^. ifFalse
+                { branches   = (:| []) $
+                               AST.CondBranch conAST (genDepsAST pm cm (br ^. ifTrue))
+                , else_      = genDepsAST pm cm <$> br ^. ifFalse
+                , endComment = Nothing
                 }
 
 genConditionAST :: HasCallStack => Condition -> AST.Condition
@@ -309,13 +310,13 @@ genExtLibDepAST (ExtLibDep name)
 
 genLibDepAST :: PackageMeta -> ComponentMeta -> LibDep -> Makefile
 genLibDepAST pm cm (KnownLib {..})
-  | (cm ^. cType) == Executable &&
+  | cm ^. cType == Executable &&
     pkgPath == "devel/hs-optparse-applicative"
       -- A special case for executables depending on
       -- optparse-applicative. Most of the time, if not always, their
       -- command-line interface is built on top of optparse-applicative and
       -- thus support generating shell completion scripts.
-      = let exeDecl = if (cm ^. cName) == distBase pm
+      = let exeDecl = if cm ^. cName == distBase pm
                       then mempty
                       else Makefile [ "OPTPARSE_APPLICATIVE_EXECUTABLES" .+= [cm ^. cName] ]
         in

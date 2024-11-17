@@ -10,6 +10,7 @@ import Cabal2Pkg.Extractor.Conditional
   ( CondBlock, CondBranch, always, branches, ifTrue, ifFalse )
 import Cabal2Pkg.Extractor.Dependency (DepSet(..), exeDeps)
 import Cabal2Pkg.Generator.Makefile (genComponentsAST)
+import Data.Coerce (coerce)
 import Data.List.NonEmpty (NonEmpty((:|)))
 import Data.MonoTraversable (omap)
 import Data.Text qualified as T
@@ -47,6 +48,7 @@ genAST pm
       where
         guarded' :: AST.Conditional
         guarded' = AST.Conditional (AST.CondBranch cond mk :| []) Nothing
+                   (Just . coerce $ guardVar)
 
         cond :: AST.Condition
         cond = AST.If (AST.Not (AST.Expr (AST.EDefined guardVar)))
@@ -59,7 +61,7 @@ genAST pm
              , abiDepends
              , pkgsrcDir
              ]
-             <> (omap unindent $ genComponentsAST pm comps')
+             <> omap unindent (genComponentsAST pm comps')
 
         guardVar :: AST.Variable
         guardVar = AST.Variable . (<> "_BUILDLINK3_MK") . T.map go . T.toUpper . pkgBase $ pm
@@ -97,7 +99,7 @@ genAST pm
     -- having no runtime dependencies should also be omitted.
     comps' :: [ComponentMeta]
     comps' = filter (^. (cDeps . to hasDeps))
-             . map (cDeps %~ filterRunDeps)
+             . fmap (cDeps %~ filterRunDeps)
              . filter isLib
              . components $ pm
       where
@@ -116,18 +118,18 @@ genAST pm
 
 hasDeps :: (Eq a, Monoid a) => CondBlock a -> Bool
 hasDeps bl
-  = (bl ^. always . to (/= mempty)) ||
-    (bl ^. branches . to (any go))
+  = bl ^. always . to (/= mempty) ||
+    bl ^. branches . to (any go)
   where
     go br
-      = (br ^. ifTrue . to hasDeps) ||
-        (br ^. ifFalse . to (maybe False hasDeps))
+      = br ^. ifTrue . to hasDeps ||
+        br ^. ifFalse . to (any hasDeps)
 
 -- THINKME: Maybe we should apply (floatBranches . garbageCollect) after
 -- this?
 filterRunDeps :: CondBlock DepSet -> CondBlock DepSet
 filterRunDeps
-  = (always %~ (exeDeps .~ []))
+  = (always %~ exeDeps .~ [])
   . (branches %~ (go <$>))
   where
     go :: CondBranch DepSet -> CondBranch DepSet
