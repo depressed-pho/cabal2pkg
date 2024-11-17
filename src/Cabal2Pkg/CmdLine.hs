@@ -27,7 +27,7 @@ module Cabal2Pkg.CmdLine
   , debug
   , info
   , warn
-  , err
+  , fatal
   ) where
 
 import Cabal2Pkg.Static (makeQ)
@@ -35,7 +35,7 @@ import Control.Applicative ((<|>), many)
 import Control.Concurrent.Deferred (Deferred, defer, force)
 import Control.Exception.Safe (Exception(..), catch, throw)
 import Control.Monad (foldM, unless, when)
-import Control.Monad.Catch (MonadThrow)
+import Control.Monad.Catch (MonadCatch, MonadThrow)
 import Control.Monad.Fix (MonadFix)
 import Control.Monad.IO.Unlift (MonadIO, MonadUnliftIO, liftIO)
 import Control.Monad.Primitive (PrimMonad(..))
@@ -203,7 +203,7 @@ parseOptions =
          p    <- doesFileExist (dir </> ".." </> ".." </> "mk" </> "bsd.pkg.mk")
          unless p $
            do dir' <- T.pack <$> OP.decodeUtf dir
-              err (dir' <> " doesn't look like a pkgsrc package directory")
+              fatal (dir' <> " doesn't look like a pkgsrc package directory")
          pure $ opts { optPkgPath = dir }
 
 
@@ -266,6 +266,7 @@ newtype CLI a = CLI { unCLI :: ReaderT Context (ResourceT IO) a }
   deriving newtype ( Applicative
                    , Functor
                    , Monad
+                   , MonadCatch
                    , MonadFix
                    , MonadIO
                    , MonadResource
@@ -276,7 +277,7 @@ newtype CLI a = CLI { unCLI :: ReaderT Context (ResourceT IO) a }
 
 instance MonadFail CLI where
   fail :: String -> CLI a
-  fail = err . T.pack
+  fail = fatal . T.pack
 
 instance Monoid a => Monoid (CLI a) where
   mempty = pure mempty
@@ -357,5 +358,5 @@ warn msg =
   do pn <- T.pack <$> getProgName
      hPutStrLn stderr (pn <> ": WARNING: " <> T.strip msg)
 
-err :: MonadThrow m => Text -> m a
-err = throw . CommandError
+fatal :: MonadThrow m => Text -> m a
+fatal = throw . CommandError

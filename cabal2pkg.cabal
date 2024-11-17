@@ -44,6 +44,7 @@ executable cabal2pkg
         Cabal2Pkg.Extractor.Dependency.PkgConfig
         Cabal2Pkg.Extractor.License
         Cabal2Pkg.Generator.Makefile
+        Cabal2Pkg.Generator.Buildlink3
         Cabal2Pkg.Static
         Control.Concurrent.Deferred
         Database.Pkgsrc.SrcDb
@@ -77,6 +78,7 @@ executable cabal2pkg
       , text                 ^>= 2.1.1
       , transformers         ^>= 0.6.1
       , typed-process        ^>= 0.2.11
+      , unix                 ^>= 2.8.4
       , unliftio             ^>= 0.2.25
       , unliftio-core        ^>= 0.2.1
       , unordered-containers ^>= 0.2.20

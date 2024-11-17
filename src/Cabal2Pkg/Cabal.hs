@@ -4,7 +4,7 @@ module Cabal2Pkg.Cabal
   ( readCabal
   ) where
 
-import Cabal2Pkg.CmdLine (CLI, err, warn)
+import Cabal2Pkg.CmdLine (CLI, fatal, warn)
 import Control.Monad.Catch (MonadThrow)
 import Control.Monad.Trans.Resource (MonadResource)
 import Data.ByteString (ByteString)
@@ -19,7 +19,8 @@ import Data.Text qualified as T
 import Distribution.PackageDescription.Parsec qualified as DPP
 import Distribution.Parsec.Warning (PWarning)
 import Distribution.Types.GenericPackageDescription (GenericPackageDescription)
-import System.OsPath (OsPath, isExtensionOf, splitPath)
+import System.OsPath (OsPath)
+import System.OsPath qualified as OP
 import System.OsPath.Internal qualified as OPI
 
 
@@ -31,7 +32,7 @@ readCabal url =
                $ gzippedTarball url .| ungzip .| untar findCabal .| C.head
           case mb of
             Nothing ->
-              err $ "Can't find any .cabal files in " <> url
+              fatal $ "Can't find any .cabal files in " <> url
             Just cabal ->
               pure cabal
      mapM_ (warn' cabalPath) ws
@@ -39,7 +40,8 @@ readCabal url =
   where
     warn' :: OsPath -> PWarning -> CLI ()
     warn' path w =
-      warn $ T.pack (show path) <> ": " <> T.pack (show w)
+      do path' <- T.pack <$> OP.decodeUtf path
+         warn $ path' <> ": " <> T.pack (show w)
 
 gzippedTarball :: MonadResource m => Text -> ConduitT i ByteString m ()
 gzippedTarball url
@@ -54,9 +56,9 @@ findCabal :: (MonadFail m, MonadThrow m)
           -> ConduitT ByteString (OsPath, [PWarning], GenericPackageDescription) m ()
 findCabal fi =
   do path <- OPI.fromBytes $ filePath fi
-     case splitPath path of
+     case OP.splitPath path of
        [_root, file]
-         | ".cabal" `isExtensionOf` file ->
+         | ".cabal" `OP.isExtensionOf` file ->
              do res <- DPP.parseGenericPackageDescription . toStrict <$> sinkLazy
                 case DPP.runParseResult res of
                   (_, Left e) ->

@@ -32,6 +32,9 @@ module Language.BMake.AST
   , blank
   , (.=)
   , (.+=)
+  , (.?=)
+  , (.:=)
+  , (.!=)
   , include
   , (?==)
 
@@ -49,6 +52,7 @@ import Data.String (IsString(..))
 import Data.Semigroup (sconcat, stimesMonoid)
 import Data.Sequence (Seq, (|>))
 import Data.Text (Text)
+import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
 import Data.Text.Lazy.Builder (Builder)
 import Data.Text.Lazy.Builder qualified as B
@@ -87,6 +91,10 @@ dotSpace depth = B.singleton '.' <> stimesMonoid (depth * 2) space
 
 parens :: Builder -> Builder
 parens b = B.singleton '(' <> b <> B.singleton ')'
+
+maybeParens :: Bool -> Builder -> Builder
+maybeParens True  = parens
+maybeParens False = id
 
 newtype Makefile = Makefile { blocks :: [Block] }
   deriving (Data, Show, Eq, Semigroup, Monoid)
@@ -159,12 +167,19 @@ instance Pretty Assignment where
   type Context Assignment = Int
   pretty col (Assignment {..})
     = mconcat [ pre
-              , stimesMonoid nTabs tab
-              , pretty () aTokens
-              , pprOptionalComment aComment
+              , if hasTokens
+                then mconcat
+                     [ stimesMonoid nTabs tab
+                     , pretty () aTokens
+                     , pprOptionalComment aComment
+                     ]
+                else foldMap (pretty ()) aComment
               , newline
               ]
     where
+      hasTokens :: Bool
+      hasTokens = any (not . T.null) aTokens
+
       pre :: Builder
       pre = pretty () aVar <> pretty () aType
 
@@ -390,11 +405,11 @@ instance Pretty Condition where
       dot = dotSpace depth
 
       go :: Condition -> Builder
-      go (If      expr) = mconcat [switch "if"     , space, pretty (False, False) expr]
-      go (Ifdef   expr) = mconcat [switch "ifdef"  , space, pretty (False, ()   ) expr]
-      go (Ifndef  expr) = mconcat [switch "ifndef" , space, pretty (False, ()   ) expr]
-      go (Ifmake  expr) = mconcat [switch "ifmake" , space, pretty (False, ()   ) expr]
-      go (Ifnmake expr) = mconcat [switch "ifnmake", space, pretty (False, ()   ) expr]
+      go (If      expr) = mconcat [switch "if"     , space, pretty (False, ()) expr]
+      go (Ifdef   expr) = mconcat [switch "ifdef"  , space, pretty (False, ()) expr]
+      go (Ifndef  expr) = mconcat [switch "ifndef" , space, pretty (False, ()) expr]
+      go (Ifmake  expr) = mconcat [switch "ifmake" , space, pretty (False, ()) expr]
+      go (Ifnmake expr) = mconcat [switch "ifnmake", space, pretty (False, ()) expr]
 
       switch :: Builder -> Builder
       switch b
@@ -411,12 +426,10 @@ data LogicalExpr a
 instance Pretty a => Pretty (LogicalExpr a) where
   -- |Whether the expression is a nested one.
   type Context (LogicalExpr a) = (Bool, Context a)
-  pretty (_, ctx) (Not e ) = B.singleton '!' <> pretty (True, ctx) e
-  pretty (_, ctx) (Or  es) = sconcat . NE.intersperse " || " $ pretty (True, ctx) <$> es
-  pretty (_, ctx) (And es) = sconcat . NE.intersperse " && " $ pretty (True, ctx) <$> es
-  pretty (isNested, ctx) (Expr e)
-    | isNested  = parens $ pretty ctx e
-    | otherwise =          pretty ctx e
+  pretty (isNested, ctx) (Not e ) = maybeParens isNested $ B.singleton '!' <> pretty (True, ctx) e
+  pretty (isNested, ctx) (Or  es) = maybeParens isNested . sconcat . NE.intersperse " || " $ pretty (True, ctx) <$> es
+  pretty (isNested, ctx) (And es) = maybeParens isNested . sconcat . NE.intersperse " && " $ pretty (True, ctx) <$> es
+  pretty (_       , ctx) (Expr e) = pretty ctx e
 
 data RelationalOp
   = EQ -- ^@==@
@@ -446,29 +459,22 @@ data Expr
   deriving (Data, Show, Eq)
 
 instance Pretty Expr where
-  -- |Whether the expression is a nested one.
-  type Context Expr = Bool
   pretty _ (EDefined  var ) = "defined"  <> parens (pretty () var )
   pretty _ (EMake     tgt ) = "make"     <> parens (pretty () tgt )
   pretty _ (EEmpty    var ) = "empty"    <> parens (pretty () var )
   pretty _ (EExists   file) = "exists"   <> parens (pretty () file)
   pretty _ (ETarget   tgt ) = "target"   <> parens (pretty () tgt )
   pretty _ (ECommands tgt ) = "commands" <> parens (pretty () tgt )
-  pretty isNested (ECompare lhs mRhs)
+  pretty _ (ECompare lhs mRhs)
     = case mRhs of
         Nothing        -> B.fromText lhs
-        Just (op, rhs) -> maybeParens $ mconcat
+        Just (op, rhs) -> mconcat
                           [ B.fromText lhs
                           , space
                           , pretty () op
                           , space
                           , B.fromText rhs
                           ]
-    where
-      maybeParens :: Builder -> Builder
-      maybeParens b
-        | isNested  = parens b
-        | otherwise = b
 
 data ForLoop = ForLoop ![Variable] !Text !Makefile
   deriving (Data, Show, Eq)
@@ -503,6 +509,15 @@ var .= tokens = BAssignment $ Assignment var Set tokens Nothing
 
 (.+=) :: Variable -> [Text] -> Block
 var .+= tokens = BAssignment $ Assignment var Append tokens Nothing
+
+(.?=) :: Variable -> [Text] -> Block
+var .?= tokens = BAssignment $ Assignment var SetIfUndefined tokens Nothing
+
+(.:=) :: Variable -> [Text] -> Block
+var .:= tokens = BAssignment $ Assignment var ExpandThenSet tokens Nothing
+
+(.!=) :: Variable -> [Text] -> Block
+var .!= tokens = BAssignment $ Assignment var ExecThenSet tokens Nothing
 
 include :: Text -> Block
 include file = BDirective $ DInclude Normal User file
