@@ -3,6 +3,7 @@
 {-# LANGUAGE RecordWildCards #-}
 module Cabal2Pkg.Generator.Makefile
   ( genMakefile
+  , genComponentsAST
   ) where
 
 import Cabal2Pkg.Extractor (PackageMeta(..))
@@ -52,7 +53,7 @@ genAST pm
             , toolsAndConfigArgs
             , maybeUnrestrictDeps
             , maybePrefs
-            , mconcat $ genComponentAST <$> comps'
+            , genComponentsAST pm comps'
             , footer
             ]
   where
@@ -116,6 +117,7 @@ genAST pm
     -- The top-level USE_TOOLS. This exists only when we have just one
     -- component and at least one unconditional pkg-config dependency or an
     -- unconditional tool dependency.
+    -- FIXME: What if we had pkg-config deps in other cases?
     useTools :: Makefile
     useTools
       = case components pm of
@@ -166,10 +168,18 @@ genAST pm
              , include "../../mk/bsd.pkg.mk"
              ]
 
-    genComponentAST :: HasCallStack => ComponentMeta -> Makefile
-    genComponentAST
-      | length (components pm) == 1 = genSingleComponentAST pm
-      | otherwise                   = genMultiComponentAST  pm
+-- | Generate a Makefile AST for component dependencies like
+--
+-- > # lib:foo
+-- > .include "../../devel/hs-bar/buildlink3.mk"
+-- >
+-- > # exe:foo
+-- > .include "../../devel/hs-baz/buildlink3.mk"
+genComponentsAST :: HasCallStack => PackageMeta -> [ComponentMeta] -> Makefile
+genComponentsAST pm comps
+  = case comps of
+      [cm] -> genSingleComponentAST pm cm
+      _    -> mconcat $ genMultiComponentAST pm <$> comps
 
 genSingleComponentAST :: HasCallStack => PackageMeta -> ComponentMeta -> Makefile
 genSingleComponentAST pm cm

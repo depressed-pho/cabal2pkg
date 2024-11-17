@@ -1,3 +1,4 @@
+{-# LANGUAGE GeneralisedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -36,6 +37,7 @@ module Language.BMake.AST
   , (.:=)
   , (.!=)
   , include
+  , unindent
   , (?==)
 
     -- * Pretty-printing
@@ -48,6 +50,9 @@ import Data.List (intersperse)
 import Data.List.NonEmpty (NonEmpty((:|)))
 import Data.List.NonEmpty qualified as NE
 import Data.Maybe (isNothing)
+import Data.MonoTraversable
+  ( Element, GrowingAppend, MonoFoldable(..), MonoFunctor(..)
+  , MonoPointed(..) )
 import Data.String (IsString(..))
 import Data.Semigroup (sconcat, stimesMonoid)
 import Data.Sequence (Seq, (|>))
@@ -99,6 +104,14 @@ maybeParens False = id
 newtype Makefile = Makefile { blocks :: [Block] }
   deriving (Data, Show, Eq, Semigroup, Monoid)
 
+type instance Element Makefile = Block
+deriving instance GrowingAppend Makefile
+deriving instance MonoFoldable Makefile
+deriving instance MonoFunctor Makefile
+deriving instance MonoPointed Makefile
+-- NOTE: Can't derive MonoTraversable due to
+-- https://stackoverflow.com/questions/49776924/newtype-deriving-issequence
+
 instance Pretty Makefile where
   -- |The current depth of nested directives.
   type Context Makefile = Int
@@ -113,6 +126,9 @@ instance Pretty Makefile where
           BAssignment a -> go (as |> a) bs
           BRule       x -> pprAssignments as <> pretty ()    x <> go mempty bs
           BDirective  x -> pprAssignments as <> pretty depth x <> go mempty bs
+          BUnindent   x -> pprAssignments as <>
+                           pretty (depth-1) (opoint x :: Makefile) <>
+                           go mempty bs
 
 newtype Comment = Comment Text
   deriving (Data, Show, Eq, IsString)
@@ -129,6 +145,7 @@ data Block
   | BAssignment !Assignment
   | BRule       !Rule
   | BDirective  !Directive
+  | BUnindent   !Block
   deriving (Data, Show, Eq)
 
 newtype Variable = Variable Text
@@ -500,6 +517,7 @@ BBlank      b # c = BBlank      $ b { bComment = Just (Comment c) }
 BAssignment a # c = BAssignment $ a { aComment = Just (Comment c) }
 BRule       r # c = BRule       $ r { rComment = Just (Comment c) }
 BDirective  d # _ = BDirective d
+BUnindent   b # _ = BUnindent b
 
 blank :: Block
 blank = BBlank $ Blank Nothing
@@ -521,6 +539,15 @@ var .!= tokens = BAssignment $ Assignment var ExecThenSet tokens Nothing
 
 include :: Text -> Block
 include file = BDirective $ DInclude Normal User file
+
+-- | Construct a block which pretty prints with one less indentation
+-- level. Used for printing unindented conditionals like
+--
+-- > .if ${foo} > 0
+-- > .include "foo.mk"
+-- > .endif
+unindent :: Block -> Block
+unindent = BUnindent
 
 infix 1 ?==
 (?==) :: Text -> Text -> Expr

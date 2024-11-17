@@ -3,6 +3,7 @@ module Cabal2Pkg.Extractor
   ( PackageMeta(..)
   , summariseCabal
   , hasLibraries
+  , hasForeignLibraries
   , hasExecutables
   ) where
 
@@ -74,13 +75,13 @@ summariseCabal gpd
     takeCatAndName = OP.joinPath . reverse . take 2 . reverse . OP.splitPath
 
 hasLibraries :: PackageMeta -> Bool
-hasLibraries = any isLib . components
-  where
-    isLib :: ComponentMeta -> Bool
-    isLib cm = cm ^. cType == Library
+hasLibraries
+  = any ((== Library) . (^. cType)) . components
+
+hasForeignLibraries :: PackageMeta -> Bool
+hasForeignLibraries
+  = any ((== ForeignLib) . (^. cType)) . components
 
 hasExecutables :: PackageMeta -> Bool
-hasExecutables = any isExe . components
-  where
-    isExe :: ComponentMeta -> Bool
-    isExe cm = cm ^. cType == Executable
+hasExecutables
+  = any ((== Executable) . (^. cType)) . components

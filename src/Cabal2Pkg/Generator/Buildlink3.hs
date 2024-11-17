@@ -4,7 +4,14 @@ module Cabal2Pkg.Generator.Buildlink3
   ) where
 
 import Cabal2Pkg.Extractor (PackageMeta(..))
+import Cabal2Pkg.Extractor.Component
+  ( ComponentMeta, ComponentType(..), cDeps, cType )
+import Cabal2Pkg.Extractor.Conditional
+  ( CondBlock, CondBranch, always, branches, ifTrue, ifFalse )
+import Cabal2Pkg.Extractor.Dependency (DepSet(..), exeDeps)
+import Cabal2Pkg.Generator.Makefile (genComponentsAST)
 import Data.List.NonEmpty (NonEmpty((:|)))
+import Data.MonoTraversable (omap)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
 import Distribution.Pretty (prettyShow)
@@ -12,8 +19,9 @@ import Distribution.Types.Version qualified as C
 import GHC.Stack (HasCallStack)
 import Language.BMake.AST
   ( Makefile(..), Block(..), Directive(..), (#), (.+=), (.?=), (.:=), blank
-  , include, prettyPrintAST )
+  , prettyPrintAST, unindent )
 import Language.BMake.AST qualified as AST
+import Lens.Micro ((^.), (.~), (%~), to)
 
 
 genBuildlink3 :: HasCallStack => PackageMeta -> TL.Text
@@ -51,6 +59,7 @@ genAST pm
              , abiDepends
              , pkgsrcDir
              ]
+             <> (omap unindent $ genComponentsAST pm comps')
 
         guardVar :: AST.Variable
         guardVar = AST.Variable . (<> "_BUILDLINK3_MK") . T.map go . T.toUpper . pkgBase $ pm
@@ -83,8 +92,44 @@ genAST pm
             var = AST.Variable $ "BUILDLINK_PKGSRCDIR." <> pkgBase pm
             dir = "../../" <> pkgPath pm
 
+    -- Since this is a buildlink3.mk, we only need to generate dependency
+    -- lists for Haskell library or foreign library components. Components
+    -- having no runtime dependencies should also be omitted.
+    comps' :: [ComponentMeta]
+    comps' = filter (^. (cDeps . to hasDeps))
+             . map (cDeps %~ filterRunDeps)
+             . filter isLib
+             . components $ pm
+      where
+        isLib :: ComponentMeta -> Bool
+        isLib cm
+          = case cm ^. cType of
+              Library    -> True
+              ForeignLib -> True
+              Executable -> False
+
     footer :: Makefile
     footer = Makefile
              [ blank
              , "BUILDLINK_TREE" .+= ["-" <> pkgBase pm]
              ]
+
+hasDeps :: (Eq a, Monoid a) => CondBlock a -> Bool
+hasDeps bl
+  = (bl ^. always . to (/= mempty)) ||
+    (bl ^. branches . to (any go))
+  where
+    go br
+      = (br ^. ifTrue . to hasDeps) ||
+        (br ^. ifFalse . to (maybe False hasDeps))
+
+-- THINKME: Maybe we should apply (floatBranches . garbageCollect) after
+-- this?
+filterRunDeps :: CondBlock DepSet -> CondBlock DepSet
+filterRunDeps
+  = (always %~ (exeDeps .~ []))
+  . (branches %~ (go <$>))
+  where
+    go :: CondBranch DepSet -> CondBranch DepSet
+    go = (ifTrue  %~ filterRunDeps)
+       . (ifFalse %~ (filterRunDeps <$>))

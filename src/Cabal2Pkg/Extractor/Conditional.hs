@@ -289,7 +289,7 @@ instance Semigroup a => Simplifiable (CondBranch a) where
 --
 -- Why do we have separate type classes for 'simplify' and
 -- 'garbageCollect'? Because the latter can only be done after forcing
--- deferred monadic computations. We can not test if @'Monad' m => m a@ is
+-- deferred monadic computations. We cannot test if @'Monad' m => m a@ is
 -- empty just because @a@ is 'Eq' and 'Monoid', without forcing the
 -- computation.
 

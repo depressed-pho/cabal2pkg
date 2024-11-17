@@ -33,15 +33,17 @@ run (InitOptions {..})
        meta <- summariseCabal cabal
        debug $ "Summarised package metadata:\n" <> T.pack (ppShow meta)
 
-       -- If the package only provides libraries but no executables,
+       -- If the package only provides Haskell libraries but no
+       -- executables or foreign libraries,
        --   * It should have buildlink3.mk.
        --   * PKGNAME should have a prefix "hs-".
        --
-       -- If it only provides executables but no libraries,
+       -- If it only provides executables but no Haskell libraries or
+       -- foreign libraries,
        --   * It shouldn't have buildlink3.mk.
        --   * PKGNAME shouldn't have a prefix "hs-".
        --
-       -- If it provides both,
+       -- In any other cases,
        --   * No rules as to whether to have buildlink3.mk. We generate one
        --     anyway, and let the user decide if they want to keep it.
        --   * No rules as to whether to have a prefix "hs-".

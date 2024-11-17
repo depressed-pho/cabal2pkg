@@ -66,6 +66,7 @@ executable cabal2pkg
       , ghc-paths            ^>= 0.1
       , microlens            ^>= 0.4.13
       , microlens-th         ^>= 0.4.3
+      , mono-traversable     ^>= 1.0
       , optparse-applicative ^>= 0.18.1
       , pretty-show          ^>= 1.10
       , primitive            ^>= 0.9
