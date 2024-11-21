@@ -99,7 +99,7 @@ optionsP =
   <*> switch
       ( long "debug" <>
         short 'd' <>
-        help "Show debugging output only useful for development of cabal2pkg"
+        help "Show debugging output that is only useful for developing cabal2pkg"
       )
   <*> option path
       ( long "pkgpath" <>

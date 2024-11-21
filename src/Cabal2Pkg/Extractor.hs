@@ -3,7 +3,7 @@ module Cabal2Pkg.Extractor
   ( PackageMeta(..)
   , summariseCabal
   , hasLibraries
-  , hasForeignLibraries
+  , hasForeignLibs
   , hasExecutables
   ) where
 
@@ -78,8 +78,8 @@ hasLibraries :: PackageMeta -> Bool
 hasLibraries
   = any ((== Library) . (^. cType)) . components
 
-hasForeignLibraries :: PackageMeta -> Bool
-hasForeignLibraries
+hasForeignLibs :: PackageMeta -> Bool
+hasForeignLibs
   = any ((== ForeignLib) . (^. cType)) . components
 
 hasExecutables :: PackageMeta -> Bool
