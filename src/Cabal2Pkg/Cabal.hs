@@ -17,8 +17,10 @@ import Data.Conduit.Zlib (ungzip)
 import Data.Text (Text, isPrefixOf)
 import Data.Text qualified as T
 import Distribution.PackageDescription.Parsec qualified as DPP
-import Distribution.Parsec.Warning (PWarning)
+import Distribution.Parsec.Warning (PWarning, showPWarning)
 import Distribution.Types.GenericPackageDescription (GenericPackageDescription)
+import Prettyprinter ((<+>))
+import Prettyprinter qualified as PP
 import System.OsPath (OsPath)
 import System.OsPath qualified as OP
 import System.OsPath.Internal qualified as OPI
@@ -32,7 +34,7 @@ readCabal url =
                $ gzippedTarball url .| ungzip .| untar findCabal .| C.head
           case mb of
             Nothing ->
-              fatal $ "Can't find any .cabal files in " <> url
+              fatal $ "Can't find any .cabal files in" <+> PP.pretty url
             Just cabal ->
               pure cabal
      mapM_ (warn' cabalPath) ws
@@ -40,8 +42,8 @@ readCabal url =
   where
     warn' :: OsPath -> PWarning -> CLI ()
     warn' path w =
-      do path' <- T.pack <$> OP.decodeUtf path
-         warn $ path' <> ": " <> T.pack (show w)
+      do path' <- OP.decodeUtf path
+         warn . PP.pretty $ showPWarning path' w
 
 gzippedTarball :: MonadResource m => Text -> ConduitT i ByteString m ()
 gzippedTarball url

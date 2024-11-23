@@ -15,7 +15,7 @@ import Cabal2Pkg.Extractor.Dependency (DepSet, extractDeps)
 import Control.Monad (unless)
 import Data.Bifunctor (first)
 import Data.Data (Data)
-import Data.Foldable (foldl')
+import Data.Foldable (foldl', toList)
 import Data.Map.Strict qualified as M
 import Data.Set (Set)
 import Data.Set qualified as S
@@ -39,6 +39,8 @@ import Distribution.Types.PackageId qualified as C
 import Distribution.Types.UnqualComponentName qualified as C
 import Lens.Micro ((^.), to)
 import Lens.Micro.TH (makeLenses)
+import Prettyprinter ((<+>), Doc)
+import Prettyprinter qualified as PP
 import UnliftIO.Async (Conc)
 
 
@@ -166,35 +168,53 @@ extractComponents gpd
 
 
 extractFlags :: FlagMap -> [C.PackageFlag] -> CLI FlagMap
-extractFlags givenFlags flags
-  = do let (defaulted, flags') = foldl' go (mempty, mempty) flags
-           unknown             = M.keysSet $ M.difference givenFlags flags'
-       unless (null defaulted) $
-         do CLI.info ("The package defines the following manual flags. You " <>
-                      "can override them with `-f' or `--flags' options:")
-            mapM_ (CLI.info . T.pack . ("  - " <>) . showPF) defaulted
-       unless (S.null unknown) $
-         do CLI.warn "Ignoring unknown flags:"
-            mapM_ (CLI.warn . T.pack . ("  - " <>) . C.unFlagName) unknown
-       pure flags'
+extractFlags givenFlags flags =
+  do let (defaulted, flags') = foldl' go (mempty, mempty) flags
+         unknown             = M.keysSet $ M.difference givenFlags flags'
+     unless (null defaulted) $
+       CLI.info ( PP.nest 2 . PP.vsep $
+                  [ PP.hsep $ [ "The package defines the following" ] <>
+                              ( if M.null givenFlags
+                                then ["additional"]
+                                else mempty
+                              ) <>
+                              [ "manual flags. You can override them with"
+                              , "-f or --flags options:"
+                              ]
+                  ] <>
+                  [ PP.pretty '-' <+> pprPF pf
+                  | pf <- defaulted
+                  ]
+                )
+     unless (S.null unknown) $
+       CLI.warn ( PP.nest 2 . PP.vsep $
+                  [ "Ignoring unknown flags:" ] <>
+                  [ PP.pretty '-' <+> PP.pretty (C.unFlagName fn)
+                  | fn <- toList unknown
+                  ]
+                )
+     pure flags'
   where
-    showPF :: C.PackageFlag -> String
-    showPF pf
-      = (C.unFlagName . C.flagName $ pf) <> ": " <> show (C.flagDefault pf)
+    pprPF :: C.PackageFlag -> Doc ann
+    pprPF pf =
+      PP.vsep [ (PP.pretty . C.unFlagName . C.flagName $ pf) <> PP.colon
+              , (PP.pretty . C.flagDescription $ pf) <>
+                PP.parens ("default:" <+> PP.pretty (C.flagDefault pf))
+              ]
 
     go :: ([C.PackageFlag], FlagMap) -> C.PackageFlag -> ([C.PackageFlag], FlagMap)
-    go (defaulted, fa) pf
-      = case M.lookup (C.flagName pf) givenFlags of
-          Just b ->
-            ( defaulted
-            , M.insert (C.flagName pf) b fa
-            )
-          Nothing
-            | C.flagManual pf ->
-                ( defaulted <> [pf]
-                , M.insert (C.flagName pf) (C.flagDefault pf) fa
-                )
-            | otherwise ->
-                ( defaulted
-                , M.insert (C.flagName pf) (C.flagDefault pf) fa
-                )
+    go (defaulted, fa) pf =
+      case M.lookup (C.flagName pf) givenFlags of
+        Just b ->
+          ( defaulted
+          , M.insert (C.flagName pf) b fa
+          )
+        Nothing
+          | C.flagManual pf ->
+              ( defaulted <> [pf]
+              , M.insert (C.flagName pf) (C.flagDefault pf) fa
+              )
+          | otherwise ->
+              ( defaulted
+              , M.insert (C.flagName pf) (C.flagDefault pf) fa
+              )

@@ -31,7 +31,7 @@ module Cabal2Pkg.CmdLine
   ) where
 
 import Cabal2Pkg.Static (makeQ)
-import Control.Applicative ((<|>), many)
+import Control.Applicative ((<|>), (<**>), many)
 import Control.Concurrent.Deferred (Deferred, defer, force)
 import Control.Exception.Safe (Exception(..), catch, throw)
 import Control.Monad (foldM, unless, when)
@@ -48,7 +48,6 @@ import Data.Maybe (fromJust)
 import Data.String (fromString)
 import Data.Text (Text)
 import Data.Text qualified as T
-import Data.Text.IO (hPutStrLn)
 import Database.Pkgsrc.SrcDb (SrcDb, createSrcDb)
 import Distribution.Parsec (explicitEitherParsec)
 import Distribution.Simple.Compiler qualified as C
@@ -63,16 +62,18 @@ import Distribution.Types.Flag qualified as C
 import Distribution.Types.Version (Version)
 import Distribution.Verbosity (silent)
 import GHC.Paths qualified as Paths
-import Options.Applicative
-  ( (<**>), Parser, ReadM, argument, eitherReader, execParser, fullDesc, header
-  , help, helper, long, metavar, option, progDesc, short, showDefault, str
-  , subparser, switch , value
-  )
+import Options.Applicative (Parser, ParserInfo, ParserPrefs, ReadM)
 import Options.Applicative qualified as OA
+import Prelude hiding (print)
+import Prettyprinter ((<+>), Doc)
+import Prettyprinter qualified as PP
+import Prettyprinter.Render.Terminal (AnsiStyle)
+import Prettyprinter.Render.Terminal qualified as PP
+import System.Console.ANSI (hNowSupportsANSI)
 import System.Directory.OsPath (doesFileExist, canonicalizePath)
 import System.Environment (getProgName, lookupEnv)
 import System.Exit (ExitCode(ExitFailure), exitWith)
-import System.IO (stderr, utf8, utf16le)
+import System.IO (stderr, stdout, utf8, utf16le)
 import System.OsPath qualified as OP
 import System.OsPath ((</>), OsPath)
 import System.OsPath.IsString ()
@@ -84,6 +85,8 @@ type FlagMap = Map FlagName Bool
 data Options
   = Options
     { optCommand  :: !Command
+      -- ^'Nothing' denotes @auto@
+    , optColour   :: !ColourPref
     , optDebug    :: !Bool
     , optPkgPath  :: !OsPath
     , optPkgFlags :: !FlagMap
@@ -92,55 +95,86 @@ data Options
     }
   deriving (Show)
 
-optionsP :: Parser Options
-optionsP =
+optionsP :: Bool -> Parser Options
+optionsP noColor =
   Options
   <$> commandP
-  <*> switch
-      ( long "debug" <>
-        short 'd' <>
-        help "Show debugging output that is only useful for developing cabal2pkg"
+  <*> OA.option colourPref
+      ( OA.long "colour" <>
+        OA.long "color" <>
+        OA.help ("Use colours on output. WHEN can be \"never\", \"always\", or " <>
+                 "\"auto\", where \"auto\" enables colours only when the stdout " <>
+                 "is a terminal") <>
+        OA.value (defaultColourPref noColor) <>
+        OA.showDefault <>
+        OA.metavar "WHEN"
       )
-  <*> option path
-      ( long "pkgpath" <>
-        short 'p' <>
-        help "The path to the pkgsrc package to work with" <>
-        showDefault <>
-        value "." <>
-        metavar "DIR"
+  <*> OA.switch
+      ( OA.long "debug" <>
+        OA.short 'd' <>
+        OA.help "Show debugging output that is only useful for developing cabal2pkg"
+      )
+  <*> OA.option path
+      ( OA.long "pkgpath" <>
+        OA.short 'p' <>
+        OA.help "The path to the pkgsrc package to work with" <>
+        OA.showDefault <>
+        OA.value "." <>
+        OA.metavar "DIR"
       )
   <*> ( M.unions <$> many
-        ( option flagMap
-          ( long "flag" <>
-            short 'f' <>
-            help "Cabal package flags, such as \"+foo -bar\"" <>
-            metavar "FLAG"
+        ( OA.option flagMap
+          ( OA.long "flag" <>
+            OA.short 'f' <>
+            OA.help "Cabal package flags, such as \"+foo -bar\"" <>
+            OA.metavar "FLAG"
           )
         )
       )
-  <*> option path
-      ( long "ghc" <>
-        help "The path to the GHC executable" <>
-        showDefault <>
-        value (fromString Paths.ghc) <>
-        metavar "FILE"
+  <*> OA.option path
+      ( OA.long "ghc" <>
+        OA.help "The path to the GHC executable" <>
+        OA.showDefault <>
+        OA.value (fromString Paths.ghc) <>
+        OA.metavar "FILE"
       )
-  <*> option path
-      ( long "make" <>
-        help "The path to the BSD make(1) command" <>
-        showDefault <>
-        value $$makeQ <>
-        metavar "FILE"
+  <*> OA.option path
+      ( OA.long "make" <>
+        OA.help "The path to the BSD make(1) command" <>
+        OA.showDefault <>
+        OA.value $$makeQ <>
+        OA.metavar "FILE"
       )
 
+data ColourPref = Always | Never | Auto
+
+instance Show ColourPref where
+  show Always = "always"
+  show Never  = "never"
+  show Auto   = "auto"
+
+colourPref :: ReadM ColourPref
+colourPref = OA.eitherReader f
+  where
+    f :: String -> Either String ColourPref
+    f "always" = Right Always
+    f "never"  = Right Never
+    f "auto"   = Right Auto
+    f _        = Left "the value must be \"always\", \"never\", or \"auto\""
+
+defaultColourPref :: Bool -> ColourPref
+defaultColourPref noColor
+  | noColor   = Never
+  | otherwise = Auto
+
 path :: ReadM OsPath
-path = eitherReader f
+path = OA.eitherReader f
   where
     f :: String -> Either String OsPath
     f = first show . OP.encodeWith utf8 utf16le
 
 flagMap :: ReadM FlagMap
-flagMap = eitherReader f
+flagMap = OA.eitherReader f
   where
     f :: String -> Either String FlagMap
     f = second fa2Map . explicitEitherParsec C.legacyParsecFlagAssignment
@@ -168,75 +202,105 @@ data UpdateOptions
 
 commandP :: Parser Command
 commandP =
-  subparser
-  ( OA.command "init"   (OA.info initP   (progDesc "Create a new pkgsrc package")) <>
-    OA.command "update" (OA.info updateP (progDesc "Update an existing pkgsrc package to the latest version"))
+  OA.subparser
+  ( OA.command "init"   (OA.info initP   (OA.progDesc "Create a new pkgsrc package")) <>
+    OA.command "update" (OA.info updateP (OA.progDesc "Update an existing pkgsrc package to the latest version"))
   )
   where
     initP :: Parser Command
     initP = (Init .) . InitOptions
-            <$> switch
-                ( long "overwrite" <>
-                  short 'w' <>
-                  help "Overwrite existing files"
+            <$> OA.switch
+                ( OA.long "overwrite" <>
+                  OA.short 'w' <>
+                  OA.help "Overwrite existing files"
                 )
-            <*> argument str (metavar "TARBALL-URL")
+            <*> OA.argument OA.str (OA.metavar "TARBALL-URL")
 
     updateP :: Parser Command
     updateP = pure $ Update UpdateOptions
 
 
+-- https://no-color.org/
+-- FIXME: Document this env var
+lookupNoColor :: MonadIO m => m Bool
+lookupNoColor =
+  do nc <- liftIO $ lookupEnv "NO_COLOR"
+     pure $ case nc of
+              Nothing -> False
+              Just "" -> False
+              Just _  -> True
+
 parseOptions :: IO Options
 parseOptions =
-  do opts <- execParser spec
-     validatePkgPath opts
+  do noColor <- lookupNoColor
+     OA.customExecParser prefs (spec noColor)
   where
-    spec = OA.info (optionsP <**> helper)
-           ( fullDesc
-             <> header "cabal2pkg - a tool to automate importing Cabal packages to pkgsrc"
-           )
+    prefs :: ParserPrefs
+    prefs = OA.prefs . mconcat
+            $ [ OA.subparserInline
+              , OA.helpLongEquals
+              , OA.helpShowGlobals
+              ]
 
-    validatePkgPath :: Options -> IO Options
-    validatePkgPath opts =
-      do dir  <- canonicalizePath $ optPkgPath opts
-         -- Does it look like a package directory?
-         p    <- doesFileExist (dir </> ".." </> ".." </> "mk" </> "bsd.pkg.mk")
-         unless p $
-           do dir' <- T.pack <$> OP.decodeUtf dir
-              fatal (dir' <> " doesn't look like a pkgsrc package directory")
-         pure $ opts { optPkgPath = dir }
+    spec :: Bool -> ParserInfo Options
+    spec noColor =
+      OA.info (optionsP noColor <**> OA.helper)
+      ( OA.fullDesc
+        <> OA.header "cabal2pkg - a tool to automate importing Cabal packages to pkgsrc"
+      )
 
 
 data Context
   = Context
-    { ctxOptions :: !Options
-    , ctxProgDb  :: !(Deferred CLI ProgramDb)
-    , ctxIPI     :: !(Deferred CLI InstalledPackageIndex)
-    , ctxSrcDb   :: !(Deferred CLI (SrcDb CLI))
+    { ctxOptions   :: !Options
+    , ctxUseColour :: !Bool
+    , ctxPkgPath   :: !(Deferred CLI OsPath)
+    , ctxProgDb    :: !(Deferred CLI ProgramDb)
+    , ctxIPI       :: !(Deferred CLI InstalledPackageIndex)
+    , ctxSrcDb     :: !(Deferred CLI (SrcDb CLI))
     }
 
 initialCtx :: (MonadThrow m, MonadUnliftIO m) => Options -> m Context
 initialCtx opts
-  = do progs <- defer mkProgDb
+  = do col   <- case optColour opts of
+                  Always -> pure True
+                  Never  -> pure False
+                  Auto   -> liftIO $ hNowSupportsANSI stdout
+       pPath <- defer mkPkgPath
+       progs <- defer mkProgDb
        ipi   <- defer readPkgDb
        sdb   <- defer mkSrcDb
        pure Context
-         { ctxOptions = opts
-         , ctxProgDb  = progs
-         , ctxIPI     = ipi
-         , ctxSrcDb   = sdb
+         { ctxOptions   = opts
+         , ctxUseColour = col
+         , ctxPkgPath   = pPath
+         , ctxProgDb    = progs
+         , ctxIPI       = ipi
+         , ctxSrcDb     = sdb
          }
 
+mkPkgPath :: CLI OsPath
+mkPkgPath =
+  do dir  <- (liftIO . canonicalizePath) . optPkgPath =<< options
+     -- Does it look like a package directory?
+     p    <- liftIO $ doesFileExist (dir </> ".." </> ".." </> "mk" </> "bsd.pkg.mk")
+     unless p $
+       do dir' <- T.pack <$> OP.decodeUtf dir
+          fatal ( PP.dquotes (PP.annotate (PP.color PP.Cyan) (PP.pretty dir')) <+>
+                  "doesn't look like a pkgsrc package directory"
+                )
+     pure dir
+
 mkProgDb :: CLI ProgramDb
-mkProgDb
-  = do debug "Configuring program database..."
-       ghcBin      <- OP.decodeUtf . optGHCBin =<< options
-       (_, _, db0) <- liftIO $
-                      GHC.configure silent (Just ghcBin) Nothing C.defaultProgramDb
-       db1         <- liftIO $
-                      foldM (flip $ C.configureProgram silent) db0 bundledProgs
-       debug . T.pack $ ppShow db1
-       pure db1
+mkProgDb =
+  do debug "Configuring program database..."
+     ghcBin      <- OP.decodeUtf . optGHCBin =<< options
+     (_, _, db0) <- liftIO $
+                    GHC.configure silent (Just ghcBin) Nothing C.defaultProgramDb
+     db1         <- liftIO $
+                    foldM (flip $ C.configureProgram silent) db0 bundledProgs
+     debug $ "Obtained a database:\n" <> (PP.pretty . T.pack . ppShow $ db1)
+     pure db1
   where
     -- We hate to hard-code these, but there seems to be no ways to avoid
     -- it.
@@ -246,19 +310,19 @@ mkProgDb
                    ]
 
 readPkgDb :: CLI InstalledPackageIndex
-readPkgDb
-  = do debug "Reading installed package index..."
-       progs <- progDb
-       liftIO $ GHC.getPackageDBContents silent C.GlobalPackageDB progs
+readPkgDb =
+  do debug "Reading installed package index..."
+     progs <- progDb
+     liftIO $ GHC.getPackageDBContents silent C.GlobalPackageDB progs
 
 mkSrcDb :: CLI (SrcDb CLI)
-mkSrcDb
-  = do make <- optMakeBin <$> options
-       root <- OP.takeDirectory . OP.takeDirectory <$> pkgPath
-       createSrcDb make root
+mkSrcDb =
+  do make <- optMakeBin <$> options
+     root <- OP.takeDirectory . OP.takeDirectory <$> pkgPath
+     createSrcDb make root
 
 
-newtype CommandError = CommandError { message :: Text }
+newtype CommandError = CommandError { message :: Doc AnsiStyle }
   deriving stock    Show
   deriving anyclass Exception
 
@@ -277,7 +341,7 @@ newtype CLI a = CLI { unCLI :: ReaderT Context (ResourceT IO) a }
 
 instance MonadFail CLI where
   fail :: String -> CLI a
-  fail = fatal . T.pack
+  fail = fatal . PP.pretty . T.pack
 
 instance Monoid a => Monoid (CLI a) where
   mempty = pure mempty
@@ -287,15 +351,28 @@ instance Semigroup a => Semigroup (CLI a) where
 
 runCLI :: CLI a -> IO a
 runCLI m =
-  ( do opts <- parseOptions
-       ctx  <- initialCtx opts
-       runResourceT (runReaderT (unCLI m) ctx)
-  )
-  `catch`
-  \(e :: CommandError) ->
-    do pn <- T.pack <$> getProgName
-       hPutStrLn stderr (pn <> ": ERROR: " <> message e)
-       exitWith (ExitFailure 1)
+  do opts <- parseOptions
+     ctx  <- initialCtx opts
+     runResourceT (runReaderT (unCLI m) ctx)
+       `catch`
+       \(e :: CommandError) ->
+         do doc       <- msgDoc e
+            useColour <- pure . ctxUseColour $ ctx
+            print' useColour doc
+            exitWith (ExitFailure 1)
+  where
+    msgDoc :: CommandError -> IO (Doc AnsiStyle)
+    msgDoc e =
+      do pn <- progName
+         pure (pn <>
+               PP.colon <+>
+               PP.annotate (baseStyle <> PP.bold) "ERROR" <>
+               PP.colon <+>
+               PP.annotate baseStyle (message e) <>
+               PP.hardline)
+
+    baseStyle :: AnsiStyle
+    baseStyle = PP.colorDull PP.Red
 
 options :: CLI Options
 options = CLI $ asks ctxOptions
@@ -304,7 +381,7 @@ command :: CLI Command
 command = optCommand <$> options
 
 pkgPath :: CLI OsPath
-pkgPath = optPkgPath <$> options
+pkgPath = CLI (asks ctxPkgPath) >>= force
 
 -- |@-d devel/foo@ => @devel@
 category :: CLI Text
@@ -315,6 +392,7 @@ category = toText . OP.takeFileName . OP.takeDirectory =<< pkgPath
 
 maintainer :: CLI (Maybe Text)
 maintainer =
+  -- FIXME: Document these env vars
   do m0 <- liftIO $ lookupEnv "PKGMAINTAINER"
      m1 <- liftIO $ lookupEnv "REPLYTO"
      pure $ T.pack <$> (m0 <|> m1)
@@ -339,24 +417,64 @@ installedPkgs = CLI (asks ctxIPI) >>= force
 srcDb :: CLI (SrcDb CLI)
 srcDb = CLI (asks ctxSrcDb) >>= force
 
-debug :: Text -> CLI ()
+print :: Doc AnsiStyle -> CLI ()
+print = (CLI (asks ctxUseColour) >>=) . flip print'
+
+print' :: MonadIO m => Bool -> Doc AnsiStyle -> m ()
+print' useColour doc =
+  let doc'
+        | useColour = doc
+        | otherwise = PP.unAnnotate doc
+  in
+    liftIO $ PP.hPutDoc stderr doc'
+
+progName :: MonadIO m => m (Doc AnsiStyle)
+progName =
+  liftIO $ PP.annotate PP.bold . PP.pretty . T.pack <$> getProgName
+
+-- |Print a debugging message to 'stderr'. The message should not end with
+-- a linebreak.
+debug :: Doc AnsiStyle -> CLI ()
 debug msg =
   do d <- optDebug <$> options
-     when d . liftIO $
-       do pn <- T.pack <$> getProgName
-          hPutStrLn stderr (pn <> ": DEBUG: " <> T.strip msg)
+     when d $
+       do pn <- progName
+          print (pn <>
+                 PP.colon <+>
+                 PP.annotate (baseStyle <> PP.bold) "DEBUG" <>
+                 PP.colon <+>
+                 PP.annotate baseStyle msg <>
+                 PP.hardline)
+  where
+    baseStyle :: AnsiStyle
+    baseStyle = PP.colorDull PP.Green
 
-info :: MonadIO m => Text -> m ()
+-- |Print an informational message to 'stderr'. The message should not end
+-- with a linebreak.
+info :: Doc AnsiStyle -> CLI ()
 info msg =
-  liftIO $
-  do pn <- T.pack <$> getProgName
-     hPutStrLn stderr (pn <> ": " <> T.strip msg)
+  do pn <- progName
+     print (pn <>
+            PP.colon <+>
+            msg <>
+            PP.hardline)
 
-warn :: MonadIO m => Text -> m ()
+-- |Print a warning message to 'stderr'. The message should not end with
+-- a linebreak.
+warn :: Doc AnsiStyle -> CLI ()
 warn msg =
-  liftIO $
-  do pn <- T.pack <$> getProgName
-     hPutStrLn stderr (pn <> ": WARNING: " <> T.strip msg)
+  do pn <- progName
+     print (pn <>
+            PP.colon <+>
+            PP.annotate (baseStyle <> PP.bold) "WARNING" <>
+            PP.colon <+>
+            PP.annotate baseStyle msg <>
+            PP.hardline)
+  where
+    baseStyle :: AnsiStyle
+    baseStyle = PP.colorDull PP.Yellow
 
-fatal :: MonadThrow m => Text -> m a
+-- |Print an error message to 'stderr' and abort the process. The message
+-- should not end with a linebreak.
+fatal :: MonadThrow m => Doc AnsiStyle -> m a
 fatal = throw . CommandError
