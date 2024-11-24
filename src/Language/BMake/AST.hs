@@ -45,7 +45,6 @@ module Language.BMake.AST
 
 import Data.Data (Data)
 import Data.Foldable (foldl')
-import Data.List (intersperse)
 import Data.List.NonEmpty (NonEmpty((:|)))
 import Data.List.NonEmpty qualified as NE
 import Data.Maybe (isNothing)
@@ -58,47 +57,32 @@ import Data.Sequence (Seq, (|>))
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
-import Data.Text.Lazy.Builder (Builder)
-import Data.Text.Lazy.Builder qualified as B
 import Prelude hiding (Ordering(..))
+import Prettyprinter ((<+>), Doc)
+import Prettyprinter qualified as PP
+import Prettyprinter.Render.Text qualified as PT
 
 
 class Pretty a where
   type Context a
   type instance Context a = ()
-  pretty  :: Context a -> a -> Builder
+  pretty  :: Context a -> a -> Doc ann
 
 instance Pretty a => Pretty [a] where
   type Context [a] = Context a
-  pretty ctx = mconcat . intersperse space . (pretty ctx <$>)
+  pretty ctx = PP.hsep . (pretty ctx <$>)
 
 instance Pretty Text where
-  pretty _ = B.fromText
+  pretty _ = PP.pretty
 
 tabWidth :: Integral n => n
 tabWidth = 8
 
-backslash :: Builder
-backslash = B.singleton '\\'
+tab :: Doc ann
+tab = PP.pretty '\t'
 
-space :: Builder
-space = B.singleton ' '
-
-newline :: Builder
-newline = B.singleton '\n'
-
-tab :: Builder
-tab = B.singleton '\t'
-
-dotSpace :: Int -> Builder
-dotSpace depth = B.singleton '.' <> stimesMonoid (depth * 2) space
-
-parens :: Builder -> Builder
-parens b = B.singleton '(' <> b <> B.singleton ')'
-
-maybeParens :: Bool -> Builder -> Builder
-maybeParens True  = parens
-maybeParens False = id
+dotSpace :: Int -> Doc ann
+dotSpace depth = PP.dot <> stimesMonoid (depth * 2) PP.space
 
 type instance Element Makefile = Block
 newtype Makefile = Makefile { blocks :: [Block] }
@@ -114,7 +98,7 @@ instance Pretty Makefile where
   pretty depth = go mempty . blocks
     where
       -- Align consecutive assignments.
-      go :: Seq Assignment -> [Block] -> Builder
+      go :: Seq Assignment -> [Block] -> Doc ann
       go as []     = pprAssignments as
       go as (b:bs) =
         case b of
@@ -129,9 +113,11 @@ newtype Comment = Comment Text
 
 instance Pretty Comment where
   pretty _ (Comment c)
-    = "# " <> B.fromText c
+    = PP.pretty '#' <+> PP.pretty c
 
-pprOptionalComment :: Maybe Comment -> Builder
+-- | Optionally render a comment at the end of a supposedly non-empty
+-- line. There will be a TAB character inserted right before @#@.
+pprOptionalComment :: Maybe Comment -> Doc ann
 pprOptionalComment = foldMap ((tab <>) . pretty ())
 
 data Block
@@ -147,7 +133,7 @@ newtype Variable = Variable Text
 
 instance Pretty Variable where
   pretty _ (Variable name)
-    = B.fromText name
+    = PP.pretty name
 
 newtype Target = Target Text
   deriving stock (Data, Show, Eq)
@@ -155,15 +141,15 @@ newtype Target = Target Text
 
 instance Pretty Target where
   pretty _ (Target path)
-    = B.fromText path
+    = PP.pretty path
 
 -- |A blank line.
 newtype Blank = Blank { bComment :: Maybe Comment }
   deriving stock (Data, Show, Eq)
 
 instance Pretty Blank where
-  pretty _ (Blank c)
-    = foldMap (pretty ()) c <> newline
+  pretty _ (Blank c) =
+    foldMap (pretty ()) c <> PP.line
 
 data Assignment
   = Assignment
@@ -178,28 +164,25 @@ instance Pretty Assignment where
   -- |The column number to align tokens.
   type Context Assignment = Int
   pretty col (Assignment {..})
-    = mconcat [ pre
+    = mconcat [ pretty () aVar <> pretty () aType
               , if hasTokens
                 then mconcat
-                     [ stimesMonoid nTabs tab
+                     [ tabs
                      , pretty () aTokens
                      , pprOptionalComment aComment
                      ]
                 else foldMap (pretty ()) aComment
-              , newline
+              , PP.line
               ]
     where
       hasTokens :: Bool
       hasTokens = (not . all T.null) aTokens
 
-      pre :: Builder
-      pre = pretty () aVar <> pretty () aType
+      tabs :: Doc ann
+      tabs = PP.column $ \cur -> stimesMonoid (nTabs cur) tab
 
-      len :: Int
-      len = fromIntegral . TL.length . B.toLazyText $ pre
-
-      nTabs :: Int
-      nTabs = (max 0 (col - len - 1) `div` tabWidth) + 1
+      nTabs :: Int -> Int
+      nTabs cur = (max 0 (col - cur - 1) `div` tabWidth) + 1
 
 data AssignmentType
   = Set            -- ^@=@
@@ -210,7 +193,7 @@ data AssignmentType
   deriving (Data, Show, Eq)
 
 instance Pretty AssignmentType where
-  pretty _ Set            = B.singleton '='
+  pretty _ Set            = PP.equals
   pretty _ Append         = "+="
   pretty _ SetIfUndefined = "?="
   pretty _ ExpandThenSet  = ":="
@@ -228,7 +211,7 @@ instance Pretty Rule where
   pretty _ (Rule {..})
     = mconcat [ pretty () rDependency
               , pprOptionalComment rComment
-              , newline
+              , PP.line
               , mconcat $ pretty () <$> rCommands
               ]
 
@@ -244,7 +227,7 @@ instance Pretty Dependency where
   pretty _ (Dependency {..})
     = mconcat [ pretty () dTargets
               , pretty () dType
-              , space
+              , PP.space
               , pretty () dSources
               ]
 
@@ -255,8 +238,8 @@ data DependencyType
   deriving (Data, Show, Eq)
 
 instance Pretty DependencyType where
-  pretty _ IfOlderThan  = B.singleton ':'
-  pretty _ Always       = B.singleton '!'
+  pretty _ IfOlderThan  = PP.colon
+  pretty _ Always       = PP.pretty '!'
   pretty _ NoAccumulate = "::"
 
 data ShellCmd = ShellCmd ![CommandMode] !Text
@@ -266,7 +249,7 @@ instance Pretty ShellCmd where
   pretty _ (ShellCmd modes cmd)
     = mconcat [ tab
               , mconcat $ pretty () <$> modes
-              , B.fromText cmd
+              , PP.pretty cmd
               ]
 
 data CommandMode
@@ -276,9 +259,9 @@ data CommandMode
   deriving (Data, Show, Eq)
 
 instance Pretty CommandMode where
-  pretty _ NoEcho = B.singleton '@'
-  pretty _ Dry    = B.singleton '+'
-  pretty _ IgnErr = B.singleton '-'
+  pretty _ NoEcho = PP.pretty '@'
+  pretty _ Dry    = PP.pretty '+'
+  pretty _ IgnErr = PP.pretty '-'
 
 data Directive
   = DInclude     !Include
@@ -298,24 +281,24 @@ data Directive
 instance Pretty Directive where
   -- |The current depth of nested directives.
   type Context Directive = Int
-  pretty depth dir = go <> newline
+  pretty depth dir = go <> PP.line
     where
-      go :: Builder
+      go :: Doc ann
       go = case dir of
              DInclude     inc  -> pretty depth inc
-             DError       msg  -> dot <> "error "          <> B.fromText msg
-             DExport      vars -> dot <> "export "         <> pretty () vars
-             DExportEnv   vars -> dot <> "export-env "     <> pretty () vars
-             DExportLit   vars -> dot <> "export-literal " <> pretty () vars
-             DInfo        msg  -> dot <> "info "           <> B.fromText msg
-             DUndef       var  -> dot <> "undef "          <> pretty () var
-             DUnexport    vars -> dot <> "unexport "       <> pretty () vars
-             DUnexportEnv vars -> dot <> "unexport-env"    <> pretty () vars
-             DWarning     msg  -> dot <> "warning "        <> B.fromText msg
+             DError       msg  -> dot <> "error"          <+> PP.pretty msg
+             DExport      vars -> dot <> "export"         <+> pretty () vars
+             DExportEnv   vars -> dot <> "export-env"     <+> pretty () vars
+             DExportLit   vars -> dot <> "export-literal" <+> pretty () vars
+             DInfo        msg  -> dot <> "info"           <+> PP.pretty msg
+             DUndef       var  -> dot <> "undef"          <+> pretty () var
+             DUnexport    vars -> dot <> "unexport"       <+> pretty () vars
+             DUnexportEnv vars -> dot <> "unexport-env"   <+> pretty () vars
+             DWarning     msg  -> dot <> "warning"        <+> PP.pretty msg
              DConditional cond -> pretty depth cond
              DFor         for  -> pretty depth for
 
-      dot :: Builder
+      dot :: Doc ann
       dot = dotSpace depth
 
 data Include = Include !IncMode !IncLoc !Text
@@ -325,12 +308,13 @@ instance Pretty Include where
   -- |The current depth of nested directives.
   type Context Include = Int
   pretty depth (Include mode loc file) =
-    dotSpace depth <> pretty () mode <> space <> pprFile
-        where
-          pprFile :: Builder
-          pprFile = case loc of
-                      System -> B.singleton '<' <> B.fromText file <> B.singleton '>'
-                      User   -> B.singleton '"' <> B.fromText file <> B.singleton '"'
+    mconcat [ dotSpace depth
+            , pretty () mode
+            , PP.space
+            , case loc of
+                System -> PP.angles  . PP.pretty $ file
+                User   -> PP.dquotes . PP.pretty $ file
+            ]
 
 data IncMode
   = Normal -- ^@.include@
@@ -390,16 +374,14 @@ instance Pretty Conditional where
         | indent    = depth + 1
         | otherwise = depth
 
-      pprBranches :: NonEmpty CondBranch -> Builder
+      pprBranches :: NonEmpty CondBranch -> Doc ann
       pprBranches (br :| brs)
         = pretty (True, contentDepth) br <>
           mconcat (pretty (False, contentDepth) <$> brs)
 
-      pprElse :: Maybe Makefile -> Builder
+      pprElse :: Maybe Makefile -> Doc ann
       pprElse Nothing  = mempty
-      pprElse (Just m) = mconcat [ dotSpace depth
-                                 , "else"
-                                 , newline
+      pprElse (Just m) = PP.vsep [ dotSpace depth <> "else"
                                  , pretty contentDepth m
                                  ]
 
@@ -411,11 +393,10 @@ instance Pretty CondBranch where
   -- e.g. @.if@ as opposed to @.elif@. The 'Int' value represents the
   -- desired, not current, depth of nested directives.
   type Context CondBranch = (Bool, Int)
-  pretty ctx@(_, depth) (CondBranch cond m)
-    = mconcat [ pretty ctx cond
-              , newline
-              , pretty depth m
-              ]
+  pretty ctx@(_, depth) (CondBranch cond m) =
+    PP.vsep [ pretty ctx cond
+            , pretty depth m
+            ]
 
 data Condition
   = If      !(LogicalExpr Expr    ) -- ^@.if@
@@ -428,19 +409,16 @@ data Condition
 instance Pretty Condition where
   type Context Condition = (Bool, Int)
   pretty (isFirst, depth) cond
-    = dot <> go cond
+    = dotSpace depth <> go cond
     where
-      dot :: Builder
-      dot = dotSpace depth
+      go :: Condition -> Doc ann
+      go (If      expr) = switch "if"      <+> pretty (False, ()) expr
+      go (Ifdef   expr) = switch "ifdef"   <+> pretty (False, ()) expr
+      go (Ifndef  expr) = switch "ifndef"  <+> pretty (False, ()) expr
+      go (Ifmake  expr) = switch "ifmake"  <+> pretty (False, ()) expr
+      go (Ifnmake expr) = switch "ifnmake" <+> pretty (False, ()) expr
 
-      go :: Condition -> Builder
-      go (If      expr) = mconcat [switch "if"     , space, pretty (False, ()) expr]
-      go (Ifdef   expr) = mconcat [switch "ifdef"  , space, pretty (False, ()) expr]
-      go (Ifndef  expr) = mconcat [switch "ifndef" , space, pretty (False, ()) expr]
-      go (Ifmake  expr) = mconcat [switch "ifmake" , space, pretty (False, ()) expr]
-      go (Ifnmake expr) = mconcat [switch "ifnmake", space, pretty (False, ()) expr]
-
-      switch :: Builder -> Builder
+      switch :: Doc ann -> Doc ann
       switch b
         | isFirst   = b
         | otherwise = "el" <> b
@@ -455,10 +433,16 @@ data LogicalExpr a
 instance Pretty a => Pretty (LogicalExpr a) where
   -- |Whether the expression is a nested one.
   type Context (LogicalExpr a) = (Bool, Context a)
-  pretty (isNested, ctx) (Not e ) = maybeParens isNested $ B.singleton '!' <> pretty (True, ctx) e
-  pretty (isNested, ctx) (Or  es) = maybeParens isNested . sconcat . NE.intersperse " || " $ pretty (True, ctx) <$> es
-  pretty (isNested, ctx) (And es) = maybeParens isNested . sconcat . NE.intersperse " && " $ pretty (True, ctx) <$> es
-  pretty (_       , ctx) (Expr e) = pretty ctx e
+  pretty (isNested, ctx) le =
+    case le of
+      Not e  -> maybeParens isNested $ PP.pretty '!' <> pretty (True, ctx) e
+      Or  es -> maybeParens isNested . sconcat . NE.intersperse " || " $ pretty (True, ctx) <$> es
+      And es -> maybeParens isNested . sconcat . NE.intersperse " && " $ pretty (True, ctx) <$> es
+      Expr e -> pretty ctx e
+    where
+      maybeParens :: Bool -> Doc ann -> Doc ann
+      maybeParens True  = PP.parens
+      maybeParens False = id
 
 data RelationalOp
   = EQ -- ^@==@
@@ -472,9 +456,9 @@ data RelationalOp
 instance Pretty RelationalOp where
   pretty _ EQ = "=="
   pretty _ NE = "!="
-  pretty _ LT = B.singleton '<'
+  pretty _ LT = PP.langle
   pretty _ LE = "<="
-  pretty _ GT = B.singleton '>'
+  pretty _ GT = PP.rangle
   pretty _ GE = ">="
 
 data Expr
@@ -488,22 +472,19 @@ data Expr
   deriving (Data, Show, Eq)
 
 instance Pretty Expr where
-  pretty _ (EDefined  var ) = "defined"  <> parens (pretty () var )
-  pretty _ (EMake     tgt ) = "make"     <> parens (pretty () tgt )
-  pretty _ (EEmpty    var ) = "empty"    <> parens (pretty () var )
-  pretty _ (EExists   file) = "exists"   <> parens (pretty () file)
-  pretty _ (ETarget   tgt ) = "target"   <> parens (pretty () tgt )
-  pretty _ (ECommands tgt ) = "commands" <> parens (pretty () tgt )
+  pretty _ (EDefined  var ) = "defined"  <> PP.parens (pretty () var )
+  pretty _ (EMake     tgt ) = "make"     <> PP.parens (pretty () tgt )
+  pretty _ (EEmpty    var ) = "empty"    <> PP.parens (pretty () var )
+  pretty _ (EExists   file) = "exists"   <> PP.parens (pretty () file)
+  pretty _ (ETarget   tgt ) = "target"   <> PP.parens (pretty () tgt )
+  pretty _ (ECommands tgt ) = "commands" <> PP.parens (pretty () tgt )
   pretty _ (ECompare lhs mRhs)
     = case mRhs of
-        Nothing        -> B.fromText lhs
-        Just (op, rhs) -> mconcat
-                          [ B.fromText lhs
-                          , space
-                          , pretty () op
-                          , space
-                          , B.fromText rhs
-                          ]
+        Nothing        -> PP.pretty lhs
+        Just (op, rhs) -> PP.hsep [ PP.pretty lhs
+                                  , pretty () op
+                                  , PP.pretty rhs
+                                  ]
 
 data ForLoop = ForLoop ![Variable] !Text !Makefile
   deriving (Data, Show, Eq)
@@ -511,17 +492,10 @@ data ForLoop = ForLoop ![Variable] !Text !Makefile
 instance Pretty ForLoop where
   -- |The current depth of nested directives.
   type Context ForLoop = Int
-  pretty depth (ForLoop vars expr body)
-    = mconcat [ dotSpace depth
-              , "for "
-              , pretty () vars
-              , " in "
-              , pretty () expr
-              , newline
-              , pretty (depth + 1) body
-              , dotSpace depth
-              , "endfor"
-              ]
+  pretty depth (ForLoop vars expr body) =
+    PP.vsep [ dotSpace depth <> "for" <+> pretty () vars <+> "in" <+> pretty () expr
+            , pretty (depth + 1) body <> dotSpace depth <> "endfor"
+            ]
 
 infix 0 #
 (#) :: Block -> Text -> Block
@@ -558,9 +532,9 @@ infix 1 ?==
 a ?== b = ECompare a (Just (EQ, b))
 
 prettyPrintAST :: Makefile -> TL.Text
-prettyPrintAST = B.toLazyText . pretty 0
+prettyPrintAST = PT.renderLazy . PP.layoutCompact . pretty 0
 
-pprAssignments :: Foldable t => t Assignment -> Builder
+pprAssignments :: Foldable t => t Assignment -> Doc ann
 pprAssignments as
   | pprNormally = foldr (\a -> (pretty alignment a <>)) mempty as
   | otherwise   = foldr (\a -> (pretty () (FoldedAssignment a) <>)) mempty as
@@ -569,12 +543,15 @@ pprAssignments as
     alignment = foldl' maxAlign 0 as
 
     maxAlign :: Int -> Assignment -> Int
-    maxAlign n (Assignment {..})
-      = let pre     = pretty () aVar <> pretty () aType
-            len     = fromIntegral . TL.length . B.toLazyText $ pre
-            aligned = ((len `div` tabWidth) + 1) * tabWidth
-        in
-          max n aligned
+    maxAlign n (Assignment {..}) =
+      -- This is essentially a two-pass operation, so we cannot implement
+      -- it in terms of things like PP.width
+      let pre     = pretty () aVar <> pretty () aType
+          render  = PT.renderLazy . PP.layoutCompact
+          len     = fromIntegral . TL.length . render $ pre
+          aligned = ((len `div` tabWidth) + 1) * tabWidth
+      in
+        max n aligned
 
     pprNormally :: Bool
     pprNormally = alignment < 32 || length as > 1
@@ -600,15 +577,21 @@ instance Pretty FoldedAssignment where
               , tab
               , if null aTokens && isNothing aComment
                 then "# empty"
-                else mconcat [ backslash
-                             , newline
+                else mconcat [ PP.backslash
+                             , PP.line
                              , go aTokens
                              , pprOptionalComment aComment
-                             , newline
+                             , PP.line
                              ]
               ]
     where
-      go :: [Text] -> Builder
+      go :: [Text] -> Doc ann
       go []     = error "impossible"
-      go [x]    = tab <> B.fromText x
-      go (x:xs) = tab <> B.fromText x <> tab <> backslash <> newline <> go xs
+      go [x]    = tab <> PP.pretty x
+      go (x:xs) = mconcat [ tab
+                          , PP.pretty x
+                          , tab
+                          , PP.backslash
+                          , PP.line
+                          , go xs
+                          ]
