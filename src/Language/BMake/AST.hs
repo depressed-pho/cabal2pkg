@@ -37,7 +37,6 @@ module Language.BMake.AST
   , (.:=)
   , (.!=)
   , include
-  , unindent
   , (?==)
 
     -- * Pretty-printing
@@ -123,9 +122,6 @@ instance Pretty Makefile where
           BAssignment a -> go (as |> a) bs
           BRule       x -> pprAssignments as <> pretty ()    x <> go mempty bs
           BDirective  x -> pprAssignments as <> pretty depth x <> go mempty bs
-          BUnindent   x -> pprAssignments as <>
-                           pretty (depth-1) (opoint x :: Makefile) <>
-                           go mempty bs
 
 newtype Comment = Comment Text
   deriving stock (Data, Show, Eq)
@@ -143,7 +139,6 @@ data Block
   | BAssignment !Assignment
   | BRule       !Rule
   | BDirective  !Directive
-  | BUnindent   !Block
   deriving (Data, Show, Eq)
 
 newtype Variable = Variable Text
@@ -317,7 +312,7 @@ instance Pretty Directive where
              DUnexport    vars      -> dot <> "unexport "       <> pretty () vars
              DUnexportEnv vars      -> dot <> "unexport-env"    <> pretty () vars
              DWarning     msg       -> dot <> "warning "        <> B.fromText msg
-             DConditional cond      -> pprConditional cond
+             DConditional cond      -> pretty depth cond
              DFor         for       -> pretty depth for
 
       dot :: Builder
@@ -331,28 +326,6 @@ instance Pretty Directive where
           pprFile = case loc of
                       System -> B.singleton '<' <> B.fromText file <> B.singleton '>'
                       User   -> B.singleton '"' <> B.fromText file <> B.singleton '"'
-
-      pprConditional :: Conditional -> Builder
-      pprConditional (Conditional {..})
-        = mconcat [ pprBranches branches
-                  , pprElse else_
-                  , dot
-                  , "endif"
-                  , pprOptionalComment endComment
-                  ]
-
-      pprBranches :: NonEmpty CondBranch -> Builder
-      pprBranches (br :| brs)
-        = pretty (True, depth) br <>
-          mconcat (pretty (False, depth) <$> brs)
-
-      pprElse :: Maybe Makefile -> Builder
-      pprElse Nothing  = mempty
-      pprElse (Just m) = mconcat [ dot
-                                 , "else"
-                                 , newline
-                                 , pretty (depth + 1) m
-                                 ]
 
 data IncMode
   = Normal -- ^@.include@
@@ -375,6 +348,9 @@ data Conditional
     { branches   :: !(NonEmpty CondBranch)
     , else_      :: !(Maybe Makefile) -- ^@.else@
     , endComment :: !(Maybe Comment)
+    -- |Whether to indent the contents of this conditional. This should
+    -- usually be 'True'.
+    , indent     :: !Bool
     }
   deriving (Data, Show, Eq)
 
@@ -393,18 +369,47 @@ instance Semigroup Conditional where
           -- block.
           ca { else_ = Just (ea <> Makefile [BDirective (DConditional cb)]) }
 
+instance Pretty Conditional where
+  -- |The current depth of nested directives.
+  type Context Conditional = Int
+  pretty depth (Conditional {..}) =
+    mconcat [ pprBranches branches
+            , pprElse else_
+            , dotSpace depth
+            , "endif"
+            , pprOptionalComment endComment
+            ]
+    where
+      contentDepth :: Int
+      contentDepth
+        | indent    = depth + 1
+        | otherwise = depth
+
+      pprBranches :: NonEmpty CondBranch -> Builder
+      pprBranches (br :| brs)
+        = pretty (True, contentDepth) br <>
+          mconcat (pretty (False, contentDepth) <$> brs)
+
+      pprElse :: Maybe Makefile -> Builder
+      pprElse Nothing  = mempty
+      pprElse (Just m) = mconcat [ dotSpace depth
+                                 , "else"
+                                 , newline
+                                 , pretty contentDepth m
+                                 ]
+
 data CondBranch = CondBranch !Condition !Makefile
   deriving (Data, Show, Eq)
 
 instance Pretty CondBranch where
   -- |The 'Bool' value indicates whether the branch is the first one,
   -- e.g. @.if@ as opposed to @.elif@. The 'Int' value represents the
-  -- current depth of nested directives.
+  -- desired, not current, depth of nested directives.
   type Context CondBranch = (Bool, Int)
   pretty ctx@(_, depth) (CondBranch cond m)
     = mconcat [ pretty ctx cond
               , newline
-              , pretty (depth + 1) m
+              , pretty depth m
               ]
 
 data Condition
@@ -518,10 +523,9 @@ infix 0 #
 BBlank      b # c = BBlank      $ b { bComment = Just (Comment c) }
 BAssignment a # c = BAssignment $ a { aComment = Just (Comment c) }
 BRule       r # c = BRule       $ r { rComment = Just (Comment c) }
--- FIXME: These aren't quite correct. We should turn (#) into a method in
+-- FIXME: This isn't quite correct. We should turn (#) into a method in
 -- some class.
 BDirective  d # _ = BDirective d
-BUnindent   b # _ = BUnindent b
 
 blank :: Block
 blank = BBlank $ Blank Nothing
@@ -543,15 +547,6 @@ var .!= tokens = BAssignment $ Assignment var ExecThenSet tokens Nothing
 
 include :: Text -> Block
 include file = BDirective $ DInclude Normal User file
-
--- | Construct a block which pretty prints with one less indentation
--- level. Used for printing unindented conditionals like
---
--- > .if ${foo} > 0
--- > .include "foo.mk"
--- > .endif
-unindent :: Block -> Block
-unindent = BUnindent
 
 infix 1 ?==
 (?==) :: Text -> Text -> Expr

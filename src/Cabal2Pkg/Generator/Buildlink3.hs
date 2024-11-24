@@ -12,15 +12,14 @@ import Cabal2Pkg.Extractor.Dependency (DepSet(..), exeDeps)
 import Cabal2Pkg.Generator.Makefile (genComponentsAST)
 import Data.Coerce (coerce)
 import Data.List.NonEmpty (NonEmpty((:|)))
-import Data.MonoTraversable (omap)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
 import Distribution.Pretty (prettyShow)
 import Distribution.Types.Version qualified as C
 import GHC.Stack (HasCallStack)
 import Language.BMake.AST
-  ( Makefile(..), Block(..), Directive(..), (#), (.+=), (.?=), (.:=), blank
-  , prettyPrintAST, unindent )
+  ( Makefile(..), Block(..), Directive(..), (#), (.+=), (.?=)
+  , (.:=), blank, prettyPrintAST )
 import Language.BMake.AST qualified as AST
 import Lens.Micro ((^.), (.~), (%~), to)
 
@@ -47,8 +46,12 @@ genAST pm
     guarded = Makefile [ BDirective (DConditional guarded') ]
       where
         guarded' :: AST.Conditional
-        guarded' = AST.Conditional (AST.CondBranch cond mk :| []) Nothing
-                   (Just . coerce $ guardVar)
+        guarded' = AST.Conditional
+                   { AST.branches   = AST.CondBranch cond mk :| []
+                   , AST.else_      = Nothing
+                   , AST.endComment = Just . coerce $ guardVar
+                   , AST.indent     = False
+                   }
 
         cond :: AST.Condition
         cond = AST.If (AST.Not (AST.Expr (AST.EDefined guardVar)))
@@ -61,7 +64,7 @@ genAST pm
              , abiDepends
              , pkgsrcDir
              ]
-             <> omap unindent (genComponentsAST pm comps')
+             <> genComponentsAST pm comps'
 
         guardVar :: AST.Variable
         guardVar = AST.Variable . (<> "_BUILDLINK3_MK") . T.map go . T.toUpper . pkgBase $ pm

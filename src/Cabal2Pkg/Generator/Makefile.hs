@@ -229,6 +229,7 @@ genDepsAST pm cm bl
                                AST.CondBranch conAST (genDepsAST pm cm (br ^. ifTrue))
                 , else_      = genDepsAST pm cm <$> br ^. ifFalse
                 , endComment = Nothing
+                , indent     = True
                 }
 
 genConditionAST :: HasCallStack => Condition -> AST.Condition
