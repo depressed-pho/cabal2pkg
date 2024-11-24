@@ -281,7 +281,7 @@ instance Pretty CommandMode where
   pretty _ IgnErr = B.singleton '-'
 
 data Directive
-  = DInclude     !IncMode !IncLoc !Text
+  = DInclude     !Include
   | DError       !Text             -- ^@.error MESSAGE@
   | DExport      ![Variable]       -- ^@.export VARIABLE ...@
   | DExportEnv   ![Variable]       -- ^@.export-env VARIABLE ...@
@@ -302,25 +302,30 @@ instance Pretty Directive where
     where
       go :: Builder
       go = case dir of
-             DInclude mode loc file -> dot <> pprInclude mode loc file
-             DError       msg       -> dot <> "error "          <> B.fromText msg
-             DExport      vars      -> dot <> "export "         <> pretty () vars
-             DExportEnv   vars      -> dot <> "export-env "     <> pretty () vars
-             DExportLit   vars      -> dot <> "export-literal " <> pretty () vars
-             DInfo        msg       -> dot <> "info "           <> B.fromText msg
-             DUndef       var       -> dot <> "undef "          <> pretty () var
-             DUnexport    vars      -> dot <> "unexport "       <> pretty () vars
-             DUnexportEnv vars      -> dot <> "unexport-env"    <> pretty () vars
-             DWarning     msg       -> dot <> "warning "        <> B.fromText msg
-             DConditional cond      -> pretty depth cond
-             DFor         for       -> pretty depth for
+             DInclude     inc  -> pretty depth inc
+             DError       msg  -> dot <> "error "          <> B.fromText msg
+             DExport      vars -> dot <> "export "         <> pretty () vars
+             DExportEnv   vars -> dot <> "export-env "     <> pretty () vars
+             DExportLit   vars -> dot <> "export-literal " <> pretty () vars
+             DInfo        msg  -> dot <> "info "           <> B.fromText msg
+             DUndef       var  -> dot <> "undef "          <> pretty () var
+             DUnexport    vars -> dot <> "unexport "       <> pretty () vars
+             DUnexportEnv vars -> dot <> "unexport-env"    <> pretty () vars
+             DWarning     msg  -> dot <> "warning "        <> B.fromText msg
+             DConditional cond -> pretty depth cond
+             DFor         for  -> pretty depth for
 
       dot :: Builder
       dot = dotSpace depth
 
-      pprInclude :: IncMode -> IncLoc -> Text -> Builder
-      pprInclude mode loc file
-        = pretty () mode <> space <> pprFile
+data Include = Include !IncMode !IncLoc !Text
+  deriving (Data, Show, Eq)
+
+instance Pretty Include where
+  -- |The current depth of nested directives.
+  type Context Include = Int
+  pretty depth (Include mode loc file) =
+    dotSpace depth <> pretty () mode <> space <> pprFile
         where
           pprFile :: Builder
           pprFile = case loc of
@@ -546,7 +551,7 @@ var .:= tokens = BAssignment $ Assignment var ExpandThenSet tokens Nothing
 var .!= tokens = BAssignment $ Assignment var ExecThenSet tokens Nothing
 
 include :: Text -> Block
-include file = BDirective $ DInclude Normal User file
+include = BDirective . DInclude . Include Normal User
 
 infix 1 ?==
 (?==) :: Text -> Text -> Expr
