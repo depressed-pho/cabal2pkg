@@ -18,6 +18,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
 import GHC.Stack (HasCallStack)
+import PackageInfo_cabal2pkg qualified as PI
 import Prelude hiding (exp)
 import Prettyprinter ((<+>), Doc)
 import Prettyprinter qualified as PP
@@ -65,10 +66,13 @@ run (InitOptions {..})
                           PP.dquotes (PP.annotate (PP.color PP.Cyan) path') <+>
                           "already exists. If you want to overwrite it," <+>
                           "re-run" <+>
-                          PP.dquotes (PP.annotate (PP.color PP.Cyan) "cabal2pkg init") <+>
+                          PP.dquotes (PP.annotate (PP.color PP.Cyan) command) <+>
                           "with -w"
                         )
           else throw e
+
+    command :: Doc ann
+    command = PP.pretty PI.name <+> "init"
 
     openFileForWrite' :: MonadResource m => OsPath -> m Handle
     openFileForWrite'

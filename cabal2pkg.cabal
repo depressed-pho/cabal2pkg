@@ -49,6 +49,7 @@ executable cabal2pkg
         Control.Concurrent.Deferred
         Database.Pkgsrc.SrcDb
         Language.BMake.AST
+        PackageInfo_cabal2pkg
         System.OsPath.IsString
 
     build-depends:

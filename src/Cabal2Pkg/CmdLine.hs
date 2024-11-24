@@ -48,6 +48,7 @@ import Data.Maybe (fromJust)
 import Data.String (fromString)
 import Data.Text (Text)
 import Data.Text qualified as T
+import Data.Version (showVersion)
 import Database.Pkgsrc.SrcDb (SrcDb, createSrcDb)
 import Distribution.Parsec (explicitEitherParsec)
 import Distribution.Simple.Compiler qualified as C
@@ -64,6 +65,7 @@ import Distribution.Verbosity (silent)
 import GHC.Paths qualified as Paths
 import Options.Applicative (Parser, ParserInfo, ParserPrefs, ReadM)
 import Options.Applicative qualified as OA
+import PackageInfo_cabal2pkg qualified as PI
 import Prelude hiding (print)
 import Prettyprinter ((<+>), Doc)
 import Prettyprinter qualified as PP
@@ -71,7 +73,7 @@ import Prettyprinter.Render.Terminal (AnsiStyle)
 import Prettyprinter.Render.Terminal qualified as PP
 import System.Console.ANSI (hNowSupportsANSI)
 import System.Directory.OsPath (doesFileExist, canonicalizePath)
-import System.Environment (getProgName, lookupEnv)
+import System.Environment (lookupEnv)
 import System.Exit (ExitCode(ExitFailure), exitWith)
 import System.IO (stderr, stdout, utf8, utf16le)
 import System.OsPath qualified as OP
@@ -112,7 +114,8 @@ optionsP noColor =
   <*> OA.switch
       ( OA.long "debug" <>
         OA.short 'd' <>
-        OA.help "Show debugging output that is only useful for developing cabal2pkg"
+        OA.help ("Show debugging output that is only useful for developing " <>
+                 PI.name)
       )
   <*> OA.option path
       ( OA.long "pkgpath" <>
@@ -202,7 +205,7 @@ data UpdateOptions
 
 commandP :: Parser Command
 commandP =
-  OA.subparser
+  OA.hsubparser
   ( OA.command "init"   (OA.info initP   (OA.progDesc "Create a new pkgsrc package")) <>
     OA.command "update" (OA.info updateP (OA.progDesc "Update an existing pkgsrc package to the latest version"))
   )
@@ -244,10 +247,13 @@ parseOptions =
 
     spec :: Bool -> ParserInfo Options
     spec noColor =
-      OA.info (optionsP noColor <**> OA.helper)
+      OA.info (optionsP noColor <**> OA.helper <**> OA.simpleVersioner ver)
       ( OA.fullDesc
-        <> OA.header "cabal2pkg - a tool to automate importing Cabal packages to pkgsrc"
+        <> OA.header (PI.name <> " - " <> PI.synopsis)
       )
+
+    ver :: String
+    ver = showVersion PI.version
 
 
 data Context
@@ -356,20 +362,18 @@ runCLI m =
      runResourceT (runReaderT (unCLI m) ctx)
        `catch`
        \(e :: CommandError) ->
-         do doc       <- msgDoc e
-            useColour <- pure . ctxUseColour $ ctx
-            print' useColour doc
+         do useColour <- pure . ctxUseColour $ ctx
+            print' useColour $ msgDoc e
             exitWith (ExitFailure 1)
   where
-    msgDoc :: CommandError -> IO (Doc AnsiStyle)
+    msgDoc :: CommandError -> Doc AnsiStyle
     msgDoc e =
-      do pn <- progName
-         pure (pn <>
-               PP.colon <+>
-               PP.annotate (baseStyle <> PP.bold) "ERROR" <>
-               PP.colon <+>
-               PP.annotate baseStyle (message e) <>
-               PP.hardline)
+      progName <>
+      PP.colon <+>
+      PP.annotate (baseStyle <> PP.bold) "ERROR" <>
+      PP.colon <+>
+      PP.annotate baseStyle (message e) <>
+      PP.hardline
 
     baseStyle :: AnsiStyle
     baseStyle = PP.colorDull PP.Red
@@ -428,9 +432,9 @@ print' useColour doc =
   in
     liftIO $ PP.hPutDoc stderr doc'
 
-progName :: MonadIO m => m (Doc AnsiStyle)
+progName :: Doc AnsiStyle
 progName =
-  liftIO $ PP.annotate PP.bold . PP.pretty . T.pack <$> getProgName
+  PP.annotate PP.bold . PP.pretty . T.pack $ PI.name
 
 -- |Print a debugging message to 'stderr'. The message should not end with
 -- a linebreak.
@@ -438,13 +442,12 @@ debug :: Doc AnsiStyle -> CLI ()
 debug msg =
   do d <- optDebug <$> options
      when d $
-       do pn <- progName
-          print (pn <>
-                 PP.colon <+>
-                 PP.annotate (baseStyle <> PP.bold) "DEBUG" <>
-                 PP.colon <+>
-                 PP.annotate baseStyle msg <>
-                 PP.hardline)
+       print (progName <>
+              PP.colon <+>
+              PP.annotate (baseStyle <> PP.bold) "DEBUG" <>
+              PP.colon <+>
+              PP.annotate baseStyle msg <>
+              PP.hardline)
   where
     baseStyle :: AnsiStyle
     baseStyle = PP.colorDull PP.Green
@@ -453,23 +456,21 @@ debug msg =
 -- with a linebreak.
 info :: Doc AnsiStyle -> CLI ()
 info msg =
-  do pn <- progName
-     print (pn <>
-            PP.colon <+>
-            msg <>
-            PP.hardline)
+  print (progName <>
+         PP.colon <+>
+         msg <>
+         PP.hardline)
 
 -- |Print a warning message to 'stderr'. The message should not end with
 -- a linebreak.
 warn :: Doc AnsiStyle -> CLI ()
 warn msg =
-  do pn <- progName
-     print (pn <>
-            PP.colon <+>
-            PP.annotate (baseStyle <> PP.bold) "WARNING" <>
-            PP.colon <+>
-            PP.annotate baseStyle msg <>
-            PP.hardline)
+  print (progName <>
+         PP.colon <+>
+         PP.annotate (baseStyle <> PP.bold) "WARNING" <>
+         PP.colon <+>
+         PP.annotate baseStyle msg <>
+         PP.hardline)
   where
     baseStyle :: AnsiStyle
     baseStyle = PP.colorDull PP.Yellow
