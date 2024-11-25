@@ -75,7 +75,7 @@ import System.Console.ANSI (hNowSupportsANSI)
 import System.Directory.OsPath (doesFileExist, canonicalizePath)
 import System.Environment (lookupEnv)
 import System.Exit (ExitCode(ExitFailure), exitWith)
-import System.IO (stderr, stdout, utf8, utf16le)
+import System.IO (stderr, utf8, utf16le)
 import System.OsPath qualified as OP
 import System.OsPath ((</>), OsPath)
 import System.OsPath.IsString ()
@@ -105,7 +105,7 @@ optionsP noColor =
       ( OA.long "colour" <>
         OA.long "color" <>
         OA.help ("Use colours on output. WHEN can be \"never\", \"always\", or " <>
-                 "\"auto\", where \"auto\" enables colours only when the stdout " <>
+                 "\"auto\", where \"auto\" enables colours only when the stderr " <>
                  "is a terminal") <>
         OA.value (defaultColourPref noColor) <>
         OA.showDefault <>
@@ -205,10 +205,18 @@ data UpdateOptions
 
 commandP :: Parser Command
 commandP =
-  OA.hsubparser
-  ( OA.command "init"   (OA.info initP   (OA.progDesc "Create a new pkgsrc package")) <>
-    OA.command "update" (OA.info updateP (OA.progDesc "Update an existing pkgsrc package to the latest version"))
-  )
+  OA.hsubparser $ mconcat
+  [ OA.command "init"
+    ( OA.info initP
+      (OA.progDesc "Create a new pkgsrc package")
+    )
+  , OA.command "update"
+    ( OA.info updateP
+      -- FIXME: We will most likely need to change this description because
+      -- not all Cabal packages reside in the HackageDB.
+      (OA.progDesc "Update an existing pkgsrc package to the latest version")
+    )
+  ]
   where
     initP :: Parser Command
     initP = (Init .) . InitOptions
@@ -271,7 +279,7 @@ initialCtx opts
   = do col   <- case optColour opts of
                   Always -> pure True
                   Never  -> pure False
-                  Auto   -> liftIO $ hNowSupportsANSI stdout
+                  Auto   -> liftIO $ hNowSupportsANSI stderr
        pPath <- defer mkPkgPath
        progs <- defer mkProgDb
        ipi   <- defer readPkgDb
