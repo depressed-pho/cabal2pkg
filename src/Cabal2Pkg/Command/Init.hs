@@ -9,6 +9,7 @@ import Cabal2Pkg.CmdLine (CLI, InitOptions(..), debug, fatal, info, pkgPath)
 import Cabal2Pkg.Extractor
   ( PackageMeta(distBase), hasLibraries, hasExecutables, hasForeignLibs, summariseCabal )
 import Cabal2Pkg.Generator.Buildlink3 (genBuildlink3)
+import Cabal2Pkg.Generator.Description (genDESCR)
 import Cabal2Pkg.Generator.Makefile (genMakefile)
 import Control.Exception.Safe (catch, throw)
 import Control.Monad.Catch (MonadThrow)
@@ -48,6 +49,9 @@ run (InitOptions {..})
        validatePkgPath meta dir
 
        --mkOut <- open' (dir </> "Makefile")
+
+       let descr = genDESCR meta
+       debug $ "Generated DESCR:\n" <> PP.pretty (TL.strip descr)
 
        let mk = genMakefile meta
        debug $ "Generated Makefile:\n" <> PP.pretty (TL.strip mk)

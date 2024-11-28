@@ -24,7 +24,7 @@ import Distribution.Types.PackageDescription qualified as PD
 import Distribution.Types.PackageId qualified as C
 import Distribution.Types.PackageName qualified as C
 import Distribution.Types.Version (Version)
-import Distribution.Utils.ShortText (fromShortText)
+import Distribution.Utils.ShortText qualified as ST
 import Lens.Micro ((^.))
 import System.OsPath (OsPath)
 import System.OsPath qualified as OP
@@ -38,6 +38,7 @@ data PackageMeta = PackageMeta
   , categories  :: ![Text]
   , maintainer  :: !Text
   , comment     :: !Text
+  , description :: !Text
   , license     :: !Text
   , flags       :: !FlagMap
   , unrestrict  :: !(Set Text)
@@ -61,7 +62,8 @@ summariseCabal gpd
          , pkgPath     = path
          , categories  = [cat]
          , maintainer  = fromMaybe "pkgsrc-users@NetBSD.org" mtr
-         , comment     = T.pack . fromShortText . PD.synopsis $ pd
+         , comment     = T.pack . ST.fromShortText . PD.synopsis $ pd
+         , description = extractDescription pd
          , license     = extractLicense pd
          , flags       = fs
          , unrestrict  = ts
@@ -73,6 +75,17 @@ summariseCabal gpd
 
     takeCatAndName :: OsPath -> OsPath
     takeCatAndName = OP.joinPath . reverse . take 2 . reverse . OP.splitPath
+
+extractDescription :: PackageDescription -> Text
+extractDescription pd =
+  let descr = PD.description pd
+      synop = PD.synopsis pd
+  in
+    T.pack . ST.fromShortText
+    $ if ST.null descr then
+        synop
+      else
+        descr
 
 hasLibraries :: PackageMeta -> Bool
 hasLibraries

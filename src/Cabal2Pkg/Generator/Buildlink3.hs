@@ -28,11 +28,11 @@ genBuildlink3 :: HasCallStack => PackageMeta -> TL.Text
 genBuildlink3 = prettyPrintAST . genAST
 
 genAST :: HasCallStack => PackageMeta -> Makefile
-genAST pm
-  = mconcat [ header
-            , guarded
-            , footer
-            ]
+genAST pm =
+  mconcat [ header
+          , guarded
+          , footer
+          ]
   where
     header :: Makefile
     header = Makefile

@@ -45,6 +45,7 @@ executable cabal2pkg
         Cabal2Pkg.Extractor.License
         Cabal2Pkg.Generator.Makefile
         Cabal2Pkg.Generator.Buildlink3
+        Cabal2Pkg.Generator.Description
         Cabal2Pkg.Static
         Control.Concurrent.Deferred
         Database.Pkgsrc.SrcDb
@@ -87,6 +88,7 @@ executable cabal2pkg
       , unliftio             ^>= 0.2.25
       , unliftio-core        ^>= 0.2.1
       , unordered-containers ^>= 0.2.20
+      , word-wrap            ^>= 0.5
 
     if flag(rtsopts)
         ghc-options: -rtsopts
