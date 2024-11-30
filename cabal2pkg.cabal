@@ -49,9 +49,9 @@ executable cabal2pkg
         Cabal2Pkg.Static
         Control.Concurrent.Deferred
         Database.Pkgsrc.SrcDb
+        GHC.Paths.OsPath
         Language.BMake.AST
         PackageInfo_cabal2pkg
-        System.OsPath.IsString
 
     build-depends:
         Cabal                ^>= 3.10.2

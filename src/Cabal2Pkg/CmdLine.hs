@@ -2,6 +2,7 @@
 {-# LANGUAGE DeriveAnyClass #-} -- for deriving Exception
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE UndecidableInstances #-}
 module Cabal2Pkg.CmdLine
@@ -45,7 +46,6 @@ import Data.Bifunctor (first, second)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as M
 import Data.Maybe (fromJust)
-import Data.String (fromString)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Version (showVersion)
@@ -62,7 +62,7 @@ import Distribution.Types.Flag (FlagName)
 import Distribution.Types.Flag qualified as C
 import Distribution.Types.Version (Version)
 import Distribution.Verbosity (silent)
-import GHC.Paths qualified as Paths
+import GHC.Paths.OsPath qualified as Paths
 import Options.Applicative (Parser, ParserInfo, ParserPrefs, ReadM)
 import Options.Applicative qualified as OA
 import PackageInfo_cabal2pkg qualified as PI
@@ -77,8 +77,7 @@ import System.Environment (lookupEnv)
 import System.Exit (ExitCode(ExitFailure), exitWith)
 import System.IO (stderr, utf8, utf16le)
 import System.OsPath qualified as OP
-import System.OsPath ((</>), OsPath)
-import System.OsPath.IsString ()
+import System.OsPath ((</>), OsPath, osp)
 import Text.Show.Pretty (ppShow)
 
 
@@ -122,7 +121,7 @@ optionsP noColor =
         OA.short 'p' <>
         OA.help "The path to the pkgsrc package to work with" <>
         OA.showDefault <>
-        OA.value "." <>
+        OA.value [osp|.|] <>
         OA.metavar "DIR"
       )
   <*> ( M.unions <$> many
@@ -138,7 +137,7 @@ optionsP noColor =
       ( OA.long "ghc" <>
         OA.help "The path to the GHC executable" <>
         OA.showDefault <>
-        OA.value (fromString Paths.ghc) <>
+        OA.value Paths.ghc <>
         OA.metavar "FILE"
       )
   <*> OA.option path
@@ -297,7 +296,7 @@ mkPkgPath :: CLI OsPath
 mkPkgPath =
   do dir  <- (liftIO . canonicalizePath) . optPkgPath =<< options
      -- Does it look like a package directory?
-     p    <- liftIO $ doesFileExist (dir </> ".." </> ".." </> "mk" </> "bsd.pkg.mk")
+     p    <- liftIO $ doesFileExist (dir </> [osp|../../mk/bsd.pkg.mk|])
      unless p $
        do dir' <- T.pack <$> OP.decodeUtf dir
           fatal ( PP.dquotes (PP.annotate (PP.color PP.Cyan) (PP.pretty dir')) <+>

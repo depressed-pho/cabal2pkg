@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 module Cabal2Pkg.Cabal
   ( readCabal
@@ -21,7 +22,7 @@ import Distribution.Parsec.Warning (PWarning, showPWarning)
 import Distribution.Types.GenericPackageDescription (GenericPackageDescription)
 import Prettyprinter ((<+>))
 import Prettyprinter qualified as PP
-import System.OsPath (OsPath)
+import System.OsPath (OsPath, osp)
 import System.OsPath qualified as OP
 import System.OsPath.Internal qualified as OPI
 
@@ -60,7 +61,7 @@ findCabal fi =
   do path <- OPI.fromBytes $ filePath fi
      case OP.splitPath path of
        [_root, file]
-         | ".cabal" `OP.isExtensionOf` file ->
+         | [osp|.cabal|] `OP.isExtensionOf` file ->
              do res <- DPP.parseGenericPackageDescription . toStrict <$> sinkLazy
                 case DPP.runParseResult res of
                   (_, Left e) ->
