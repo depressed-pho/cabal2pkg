@@ -52,6 +52,7 @@ executable cabal2pkg
         GHC.Paths.OsPath
         Language.BMake.AST
         PackageInfo_cabal2pkg
+        System.File.OsPath.Alt
 
     build-depends:
         Cabal                ^>= 3.10.2

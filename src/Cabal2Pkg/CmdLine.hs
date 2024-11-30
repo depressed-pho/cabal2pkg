@@ -13,11 +13,16 @@ module Cabal2Pkg.CmdLine
   , InitOptions(..)
   , UpdateOptions(..)
 
+    -- * Running the CLI monad
   , runCLI
+
+    -- * Query
   , command
-  , pkgPath
+  , origPkgPath
+  , canonPkgPath
   , category
   , maintainer
+  , makeCmd
   , pkgFlags
   , progDb
   , ghcVersion
@@ -29,12 +34,15 @@ module Cabal2Pkg.CmdLine
   , info
   , warn
   , fatal
+
+    -- * Running @make(1)@
+  , runMake
   ) where
 
 import Cabal2Pkg.Static (makeQ)
 import Control.Applicative ((<|>), (<**>), many)
 import Control.Concurrent.Deferred (Deferred, defer, force)
-import Control.Exception.Safe (Exception(..), catch, throw)
+import Control.Exception.Safe (Exception(..), MonadMask, catch, throw)
 import Control.Monad (foldM, unless, when)
 import Control.Monad.Catch (MonadCatch, MonadThrow)
 import Control.Monad.Fix (MonadFix)
@@ -78,6 +86,7 @@ import System.Exit (ExitCode(ExitFailure), exitWith)
 import System.IO (stderr, utf8, utf16le)
 import System.OsPath qualified as OP
 import System.OsPath ((</>), OsPath, osp)
+import System.Process.Typed qualified as PT
 import Text.Show.Pretty (ppShow)
 
 
@@ -91,8 +100,8 @@ data Options
     , optDebug    :: !Bool
     , optPkgPath  :: !OsPath
     , optPkgFlags :: !FlagMap
-    , optGHCBin   :: !OsPath
-    , optMakeBin  :: !OsPath
+    , optGHCCmd   :: !OsPath
+    , optMakeCmd  :: !OsPath
     }
   deriving (Show)
 
@@ -265,12 +274,12 @@ parseOptions =
 
 data Context
   = Context
-    { ctxOptions   :: !Options
-    , ctxUseColour :: !Bool
-    , ctxPkgPath   :: !(Deferred CLI OsPath)
-    , ctxProgDb    :: !(Deferred CLI ProgramDb)
-    , ctxIPI       :: !(Deferred CLI InstalledPackageIndex)
-    , ctxSrcDb     :: !(Deferred CLI (SrcDb CLI))
+    { ctxOptions      :: !Options
+    , ctxUseColour    :: !Bool
+    , ctxCanonPkgPath :: !(Deferred CLI OsPath)
+    , ctxProgDb       :: !(Deferred CLI ProgramDb)
+    , ctxIPI          :: !(Deferred CLI InstalledPackageIndex)
+    , ctxSrcDb        :: !(Deferred CLI (SrcDb CLI))
     }
 
 initialCtx :: (MonadThrow m, MonadUnliftIO m) => Options -> m Context
@@ -279,21 +288,21 @@ initialCtx opts
                   Always -> pure True
                   Never  -> pure False
                   Auto   -> liftIO $ hNowSupportsANSI stderr
-       pPath <- defer mkPkgPath
+       pPath <- defer mkCanonPkgPath
        progs <- defer mkProgDb
        ipi   <- defer readPkgDb
        sdb   <- defer mkSrcDb
        pure Context
-         { ctxOptions   = opts
-         , ctxUseColour = col
-         , ctxPkgPath   = pPath
-         , ctxProgDb    = progs
-         , ctxIPI       = ipi
-         , ctxSrcDb     = sdb
+         { ctxOptions      = opts
+         , ctxUseColour    = col
+         , ctxCanonPkgPath = pPath
+         , ctxProgDb       = progs
+         , ctxIPI          = ipi
+         , ctxSrcDb        = sdb
          }
 
-mkPkgPath :: CLI OsPath
-mkPkgPath =
+mkCanonPkgPath :: CLI OsPath
+mkCanonPkgPath =
   do dir  <- (liftIO . canonicalizePath) . optPkgPath =<< options
      -- Does it look like a package directory?
      p    <- liftIO $ doesFileExist (dir </> [osp|../../mk/bsd.pkg.mk|])
@@ -307,9 +316,9 @@ mkPkgPath =
 mkProgDb :: CLI ProgramDb
 mkProgDb =
   do debug "Configuring program database..."
-     ghcBin      <- OP.decodeUtf . optGHCBin =<< options
+     ghcCmd      <- OP.decodeUtf . optGHCCmd =<< options
      (_, _, db0) <- liftIO $
-                    GHC.configure silent (Just ghcBin) Nothing C.defaultProgramDb
+                    GHC.configure silent (Just ghcCmd) Nothing C.defaultProgramDb
      db1         <- liftIO $
                     foldM (flip $ C.configureProgram silent) db0 bundledProgs
      debug $ "Obtained a database:\n" <> (PP.pretty . T.pack . ppShow $ db1)
@@ -330,8 +339,8 @@ readPkgDb =
 
 mkSrcDb :: CLI (SrcDb CLI)
 mkSrcDb =
-  do make <- optMakeBin <$> options
-     root <- OP.takeDirectory . OP.takeDirectory <$> pkgPath
+  do make <- optMakeCmd <$> options
+     root <- OP.takeDirectory . OP.takeDirectory <$> canonPkgPath
      createSrcDb make root
 
 
@@ -346,6 +355,7 @@ newtype CLI a = CLI { unCLI :: ReaderT Context (ResourceT IO) a }
                    , MonadCatch
                    , MonadFix
                    , MonadIO
+                   , MonadMask
                    , MonadResource
                    , MonadThrow
                    , MonadUnliftIO
@@ -391,12 +401,15 @@ options = CLI $ asks ctxOptions
 command :: CLI Command
 command = optCommand <$> options
 
-pkgPath :: CLI OsPath
-pkgPath = CLI (asks ctxPkgPath) >>= force
+origPkgPath :: CLI OsPath
+origPkgPath = optPkgPath <$> options
+
+canonPkgPath :: CLI OsPath
+canonPkgPath = CLI (asks ctxCanonPkgPath) >>= force
 
 -- |@-d devel/foo@ => @devel@
 category :: CLI Text
-category = toText . OP.takeFileName . OP.takeDirectory =<< pkgPath
+category = toText . OP.takeFileName . OP.takeDirectory =<< canonPkgPath
   where
     toText :: MonadThrow m => OsPath -> m Text
     toText = (T.pack <$>) . OP.decodeUtf
@@ -407,6 +420,9 @@ maintainer =
   do m0 <- liftIO $ lookupEnv "PKGMAINTAINER"
      m1 <- liftIO $ lookupEnv "REPLYTO"
      pure $ T.pack <$> (m0 <|> m1)
+
+makeCmd :: CLI OsPath
+makeCmd = optMakeCmd <$> options
 
 pkgFlags :: CLI FlagMap
 pkgFlags = optPkgFlags <$> options
@@ -486,3 +502,17 @@ warn msg =
 -- should not end with a linebreak.
 fatal :: MonadThrow m => Doc AnsiStyle -> m a
 fatal = throw . CommandError
+
+-- |Run @make(1)@ with the working directory set to 'canonPkgPath'. The
+-- child process is spawned with stdin closed, inheriting stderr, and
+-- anything written to its stdout is redirected to stderr.
+runMake :: [Text] -> CLI ()
+runMake args =
+  do make <- OP.decodeUtf =<< makeCmd
+     dir  <- OP.decodeUtf =<< canonPkgPath
+     let conf = PT.setStdin PT.nullStream
+              . PT.setStdout (PT.useHandleOpen stderr)
+              . PT.setWorkingDir dir
+              $ PT.proc make (T.unpack <$> args)
+     debug $ "Running " <> PP.pretty (show make) <+> PP.hsep (PP.pretty . show <$> args)
+     PT.runProcess_ conf

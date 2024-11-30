@@ -57,13 +57,15 @@ genAST pm =
         cond = AST.If (AST.Not (AST.Expr (AST.EDefined guardVar)))
 
         mk :: Makefile
-        mk = Makefile
-             [ guardVar .:= []
-             , blank
-             , apiDepends
-             , abiDepends
-             , pkgsrcDir
-             ]
+        mk = Makefile [ guardVar .:= []
+                      , blank
+                      , apiDepends
+                      , abiDepends
+                      , pkgsrcDir
+                      ]
+             <> case comps' of
+                  [] -> mempty
+                  _  -> Makefile $ pure blank
              <> genComponentsAST pm comps'
 
         guardVar :: AST.Variable

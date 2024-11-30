@@ -1,38 +1,42 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE RecordWildCards #-}
 module Cabal2Pkg.Command.Init
   ( run
   ) where
 
 import Cabal2Pkg.Cabal (readCabal)
-import Cabal2Pkg.CmdLine (CLI, InitOptions(..), debug, fatal, info, pkgPath)
+import Cabal2Pkg.CmdLine
+  ( CLI, InitOptions(..), debug, fatal, info, canonPkgPath, origPkgPath
+  , makeCmd, runMake )
 import Cabal2Pkg.Extractor
-  ( PackageMeta(distBase), hasLibraries, hasExecutables, hasForeignLibs, summariseCabal )
+  ( PackageMeta(distBase), hasLibraries, hasExecutables, hasForeignLibs
+  , summariseCabal )
 import Cabal2Pkg.Generator.Buildlink3 (genBuildlink3)
 import Cabal2Pkg.Generator.Description (genDESCR)
 import Cabal2Pkg.Generator.Makefile (genMakefile)
 import Control.Exception.Safe (catch, throw)
+import Control.Monad (when)
 import Control.Monad.Catch (MonadThrow)
-import Control.Monad.Trans.Resource (MonadResource, allocate)
+import Control.Monad.IO.Unlift (liftIO)
+import Data.ByteString.Lazy qualified as LBS
 import Data.CaseInsensitive qualified as CI
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
+import Data.Text.Lazy.Encoding qualified as TL
 import GHC.Stack (HasCallStack)
 import PackageInfo_cabal2pkg qualified as PI
-import Prelude hiding (exp)
+import Prelude hiding (exp, writeFile)
 import Prettyprinter ((<+>), Doc)
 import Prettyprinter qualified as PP
 import Prettyprinter.Render.Terminal (AnsiStyle)
 import Prettyprinter.Render.Terminal qualified as PP
-import System.IO (Handle, hClose)
+import System.Directory.OsPath (createDirectoryIfMissing)
+import System.File.OsPath.Alt (writeFile, writeFreshFile)
 import System.IO.Error (isAlreadyExistsError)
-import System.OsPath ((</>), OsPath)
+import System.OsPath ((</>), OsPath, osp)
 import System.OsPath qualified as OP
-import System.OsString.Internal.Types (OsString(..))
-import System.OsString.Posix (PosixString)
-import System.Posix.IO.PosixString
-  ( OpenFileFlags(..), OpenMode(..), defaultFileFlags, fdToHandle, openFd )
 import Text.Show.Pretty (ppShow)
 
 run :: HasCallStack => InitOptions -> CLI ()
@@ -45,43 +49,79 @@ run (InitOptions {..})
        meta <- summariseCabal cabal
        debug $ "Summarised package metadata:\n" <> PP.pretty (ppShow meta)
 
-       dir <- pkgPath
-       validatePkgPath meta dir
+       canonPath <- canonPkgPath
+       validatePkgPath meta canonPath
+       liftIO $ createDirectoryIfMissing True canonPath
 
-       --mkOut <- open' (dir </> "Makefile")
-
+       -- These files are generated from the package description. We don't
+       -- overwrite existing files unless -w is given.
        let descr = genDESCR meta
        debug $ "Generated DESCR:\n" <> PP.pretty (TL.strip descr)
+       writeFile' [osp|DESCR|] (TL.encodeUtf8 descr)
 
        let mk = genMakefile meta
        debug $ "Generated Makefile:\n" <> PP.pretty (TL.strip mk)
+       writeFile' [osp|Makefile|] (TL.encodeUtf8 mk)
 
-       let bl3 = genBuildlink3 meta
-       debug $ "Generated buildlink3.mk:\n" <> PP.pretty (TL.strip bl3)
+       when (shouldHaveBuildlink3 meta /= Just False) $
+         do let bl3 = genBuildlink3 meta
+            debug $ "Generated buildlink3.mk:\n" <> PP.pretty (TL.strip bl3)
+            writeFile' [osp|buildlink3.mk|] (TL.encodeUtf8 bl3)
+
+       -- PLIST cannot be directly generated from the package
+       -- description. If it already exists we leave them unchanged.
+       plist <- initialPLIST
+       createFile' [osp|PLIST|] (TL.encodeUtf8 plist)
+
+       -- Generate distinfo, but the only way to do it is to run make(1).
+       info $ "Generating distinfo..."
+       runMake ["distinfo"]
   where
-    open' :: OsPath -> CLI Handle
-    open' path
-      = openFileForWrite' path
-        `catch`
-        \(e :: IOError) ->
-          if isAlreadyExistsError e
-          then do path' <- PP.pretty <$> OP.decodeUtf path
-                  fatal ( "The file" <+>
-                          PP.dquotes (PP.annotate (PP.color PP.Cyan) path') <+>
-                          "already exists. If you want to overwrite it," <+>
-                          "re-run" <+>
-                          PP.dquotes (PP.annotate (PP.color PP.Cyan) command) <+>
-                          "with -w"
-                        )
-          else throw e
-
     command :: Doc ann
     command = PP.pretty PI.name <+> "init"
 
-    openFileForWrite' :: MonadResource m => OsPath -> m Handle
-    openFileForWrite'
-      | optOverwrite = openFileForWrite
-      | otherwise    = openFreshFile
+    writeFile' :: OsPath -> LBS.ByteString -> CLI ()
+    writeFile' name bs =
+      do let f | optOverwrite = writeFile
+               | otherwise    = writeFreshFile
+         cfp  <- (</> name) <$> canonPkgPath
+         ofp  <- (</> name) <$> origPkgPath
+         ofp' <- PP.pretty <$> OP.decodeUtf ofp
+         f cfp bs `catch` \(e :: IOError) ->
+           if isAlreadyExistsError e then
+             fatal ( "The file" <+>
+                     PP.dquotes (PP.annotate (PP.color PP.Cyan) ofp') <+>
+                     "already exists. If you want to overwrite it," <+>
+                     "re-run" <+>
+                     PP.dquotes (PP.annotate (PP.color PP.Cyan) command) <+>
+                     "with -w"
+                   )
+           else
+             throw e
+         info $ "Wrote " <> ofp'
+
+    createFile' :: OsPath -> LBS.ByteString -> CLI ()
+    createFile' name bs =
+      do cfp  <- (</> name) <$> canonPkgPath
+         ofp  <- (</> name) <$> origPkgPath
+         ofp' <- PP.pretty <$> OP.decodeUtf ofp
+         ( do writeFreshFile cfp bs
+              info $ "Wrote " <> ofp'
+           ) `catch` \(e :: IOError) ->
+           if isAlreadyExistsError e then
+             pure ()
+           else
+             throw e
+
+initialPLIST :: CLI TL.Text
+initialPLIST =
+  do make <- TL.pack <$> (OP.decodeUtf . OP.takeFileName =<< makeCmd)
+     pure . TL.intercalate "\n" $
+       [ "@comment $NetBSD$"
+       , "@comment TODO: To fill this file with the file listing:"
+       , "@comment TODO: 1. Run \"" <> make <> " package\""
+       , "@comment TODO: 1. Run \"" <> make <> " print-PLIST\""
+       ]
 
 validatePkgPath :: MonadThrow m => PackageMeta -> OsPath -> m ()
 validatePkgPath meta path
@@ -180,40 +220,6 @@ validatePkgPath meta path
            else
              -- Totally incorrect
              fatal (expAndAct' <> "." <+> renameDir)
-
--- |Open a file for writing. Existing files will be overwritten.
-openFileForWrite :: MonadResource m => OsPath -> m Handle
-openFileForWrite path
-  = openFileHandle path WriteOnly flags
-  where
-    flags :: OpenFileFlags
-    flags = defaultFileFlags
-            { exclusive = False
-            , trunc     = True
-            , creat     = Just 0o666
-            , cloexec   = True
-            }
-
--- |Open a file for writing, but only when the file doesn't already
--- exist. If it exists the action raises an 'IOError'.
-openFreshFile :: MonadResource m => OsPath -> m Handle
-openFreshFile path
-  = openFileHandle path WriteOnly flags
-  where
-    flags :: OpenFileFlags
-    flags = defaultFileFlags
-            { exclusive = True
-            , trunc     = True
-            , creat     = Just 0o666
-            , cloexec   = True
-            }
-
-openFileHandle :: MonadResource m => OsPath -> OpenMode -> OpenFileFlags -> m Handle
-openFileHandle path mode flags
-  = snd <$> allocate (fdToHandle =<< openFd path' mode flags) hClose
-  where
-    path' :: PosixString
-    path' = getOsString path
 
 --
 -- If the package only provides Haskell libraries but no executables or

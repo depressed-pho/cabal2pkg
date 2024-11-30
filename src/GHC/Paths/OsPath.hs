@@ -2,9 +2,9 @@
 -- |This is an alternative API for ghc-paths based on the 'OsPath' type.
 module GHC.Paths.OsPath
   ( ghc
-  , ghc_pkg
-  , libdir
-  , docdir
+  , ghcPkg
+  , libDir
+  , docDir
   ) where
 
 import GHC.Paths qualified as GP
@@ -15,14 +15,14 @@ import System.OsPath (OsPath)
 ghc :: OsPath
 ghc = unsafeEncodeUtf GP.ghc
 
-ghc_pkg :: OsPath
-ghc_pkg = unsafeEncodeUtf GP.ghc_pkg
+ghcPkg :: OsPath
+ghcPkg = unsafeEncodeUtf GP.ghc_pkg
 
-libdir :: OsPath
-libdir = unsafeEncodeUtf GP.libdir
+libDir :: OsPath
+libDir = unsafeEncodeUtf GP.libdir
 
-docdir :: OsPath
-docdir = unsafeEncodeUtf GP.docdir
+docDir :: OsPath
+docDir = unsafeEncodeUtf GP.docdir
 
 -- |A shim to unsafeEncodeUtf introduced in filepath-1.5.2
 unsafeEncodeUtf :: HasCallStack => String -> OsPath

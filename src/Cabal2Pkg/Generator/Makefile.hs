@@ -59,16 +59,35 @@ genAST pm
   where
     header :: Makefile
     header = Makefile
-             [ blank # "$NetBSD$"
-             , blank
-             , "DISTNAME"   .= pure distName
-             , "CATEGORIES" .= categories pm
-             , blank
-             , "MAINTAINER" .= pure (maintainer pm)
-             , "COMMENT"    .= pure (comment pm)
-             , "LICENSE"    .= pure (license pm)
-             , blank
-             ]
+             $  [ blank # "$NetBSD$"
+                , blank
+                , "DISTNAME"   .= pure distName
+                ]
+             -- mk/haskell.mk provides a default definition of PKGNAME as
+             -- hs-${DISTNAME}. We should have defined it as
+             -- hs-${DISTNAME:tl} but it's too late. Changing it at this
+             -- point would cause a major breakage. So we need to
+             -- explicitly define it here whenever pkgBase isn't equivalent
+             -- to hs-${DISTNAME}.
+             <> if pkgBase pm == "hs-" <> distName then
+                  mempty
+                else
+                  [ "PKGNAME" .= pure (if pkgBase pm == distName then
+                                         "${DISTNAME}"
+                                       else
+                                         "${DISTNAME:tl}")
+                  ]
+             <> [ "CATEGORIES" .= categories pm
+                  -- FIXME: Generate MASTER_SITES here, if the package
+                  -- isn't from Hackage.
+                , blank
+                , "MAINTAINER" .= pure (maintainer pm)
+                  -- FIXME: Generate HOMEPAGE here, if the package isn't
+                  -- from Hackage.
+                , "COMMENT"    .= pure (comment pm)
+                , "LICENSE"    .= pure (license pm)
+                , blank
+                ]
 
     distName :: Text
     distName = mconcat [ distBase pm

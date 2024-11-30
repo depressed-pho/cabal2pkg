@@ -49,8 +49,8 @@ data PackageMeta = PackageMeta
 
 summariseCabal :: GenericPackageDescription -> CLI PackageMeta
 summariseCabal gpd
-  = do path     <- T.pack <$> (OP.decodeUtf . takeCatAndName  =<< CLI.pkgPath)
-       base     <- T.pack <$> (OP.decodeUtf . OP.takeFileName =<< CLI.pkgPath)
+  = do path     <- T.pack <$> (OP.decodeUtf . takeCatAndName  =<< CLI.canonPkgPath)
+       base     <- T.pack <$> (OP.decodeUtf . OP.takeFileName =<< CLI.canonPkgPath)
        cat      <- CLI.category
        mtr      <- CLI.maintainer
        fs       <- CLI.pkgFlags
@@ -81,11 +81,16 @@ extractDescription pd =
   let descr = PD.description pd
       synop = PD.synopsis pd
   in
-    T.pack . ST.fromShortText
-    $ if ST.null descr then
-        synop
+    if ST.null descr then
+      if ST.null synop then
+        T.intercalate "\n" $
+        [ "TODO: Fill in a short description of the package."
+        , "TODO: It should fit on a traditional terminal of 80x25 characters."
+        ]
       else
-        descr
+        T.pack . ST.fromShortText $ synop
+    else
+      T.pack . ST.fromShortText $ descr
 
 hasLibraries :: PackageMeta -> Bool
 hasLibraries
