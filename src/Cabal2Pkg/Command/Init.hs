@@ -74,7 +74,7 @@ run (InitOptions {..})
        createFile' [osp|PLIST|] (TL.encodeUtf8 plist)
 
        -- Generate distinfo, but the only way to do it is to run make(1).
-       info $ "Generating distinfo..."
+       info "Generating distinfo..."
        runMake ["distinfo"]
   where
     command :: Doc ann

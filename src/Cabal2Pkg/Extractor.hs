@@ -83,10 +83,10 @@ extractDescription pd =
   in
     if ST.null descr then
       if ST.null synop then
-        T.intercalate "\n" $
-        [ "TODO: Fill in a short description of the package."
-        , "TODO: It should fit on a traditional terminal of 80x25 characters."
-        ]
+        T.intercalate "\n"
+          [ "TODO: Fill in a short description of the package."
+          , "TODO: It should fit on a traditional terminal of 80x25 characters."
+          ]
       else
         T.pack . ST.fromShortText $ synop
     else
