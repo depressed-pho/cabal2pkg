@@ -67,8 +67,8 @@ genAST pm
              -- hs-${DISTNAME}. We should have defined it as
              -- hs-${DISTNAME:tl} but it's too late. Changing it at this
              -- point would cause a major breakage. So we need to
-             -- explicitly define it here whenever pkgBase isn't equivalent
-             -- to hs-${DISTNAME}.
+             -- explicitly define it here whenever pkgBase isn't equal to
+             -- hs-${DISTNAME}.
              <> if pkgBase pm == "hs-" <> distName then
                   mempty
                 else

@@ -1,7 +1,7 @@
 cabal-version:      3.4
 name:               cabal2pkg
 version:            0.1.0.0
-synopsis:           Tool to automate importing Cabal packages to pkgsrc
+synopsis:           A tool to automate importing Cabal packages to pkgsrc
 -- description:
 homepage:           https://github.com/depressed-pho/cabal2pkg
 license:            CC0-1.0
@@ -71,6 +71,7 @@ executable cabal2pkg
       , microlens            ^>= 0.4.13
       , microlens-th         ^>= 0.4.3
       , mono-traversable     ^>= 1.0
+      , network-uri          ^>= 2.6.4
       , optparse-applicative ^>= 0.18.1
       , prettyprinter        ^>= 1.7.1
       , prettyprinter-ansi-terminal ^>= 1.1.3

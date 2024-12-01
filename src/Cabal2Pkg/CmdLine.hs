@@ -71,6 +71,7 @@ import Distribution.Types.Flag qualified as C
 import Distribution.Types.Version (Version)
 import Distribution.Verbosity (silent)
 import GHC.Paths.OsPath qualified as Paths
+import Network.URI (URI, parseURIReference)
 import Options.Applicative (Parser, ParserInfo, ParserPrefs, ReadM)
 import Options.Applicative qualified as OA
 import PackageInfo_cabal2pkg qualified as PI
@@ -193,6 +194,9 @@ flagMap = OA.eitherReader f
     fa2Map :: C.FlagAssignment -> FlagMap
     fa2Map = M.fromList . C.unFlagAssignment
 
+uriReference :: ReadM URI
+uriReference = OA.maybeReader parseURIReference
+
 data Command
   = Init   !InitOptions
   | Update !UpdateOptions
@@ -201,7 +205,7 @@ data Command
 data InitOptions
   = InitOptions
     { optOverwrite  :: !Bool
-    , optTarballURL :: !Text
+    , optPackageURI :: !URI
     }
   deriving (Show)
 
@@ -221,7 +225,7 @@ commandP =
   , OA.command "update"
     ( OA.info updateP
       -- FIXME: We will most likely need to change this description because
-      -- not all Cabal packages reside in the HackageDB.
+      -- not all Cabal packages reside in Hackage.
       (OA.progDesc "Update an existing pkgsrc package to the latest version")
     )
   ]
@@ -233,7 +237,7 @@ commandP =
                   OA.short 'w' <>
                   OA.help "Overwrite existing files"
                 )
-            <*> OA.argument OA.str (OA.metavar "TARBALL-URL")
+            <*> OA.argument uriReference (OA.metavar "PACKAGE-URI")
 
     updateP :: Parser Command
     updateP = pure $ Update UpdateOptions
