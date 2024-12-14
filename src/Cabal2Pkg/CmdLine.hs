@@ -26,6 +26,7 @@ module Cabal2Pkg.CmdLine
   , pkgFlags
   , progDb
   , ghcVersion
+  , hackageURI
   , installedPkgs
   , srcDb
 
@@ -71,7 +72,8 @@ import Distribution.Types.Flag qualified as C
 import Distribution.Types.Version (Version)
 import Distribution.Verbosity (silent)
 import GHC.Paths.OsPath qualified as Paths
-import Network.URI (URI, parseURIReference)
+import Network.URI (URI, parseURI, parseURIReference)
+import Network.URI.Static (uri)
 import Options.Applicative (Parser, ParserInfo, ParserPrefs, ReadM)
 import Options.Applicative qualified as OA
 import PackageInfo_cabal2pkg qualified as PI
@@ -102,6 +104,7 @@ data Options
     , optPkgPath  :: !OsPath
     , optPkgFlags :: !FlagMap
     , optGHCCmd   :: !OsPath
+    , optHackage  :: !URI
     , optMakeCmd  :: !OsPath
     }
   deriving (Show)
@@ -150,6 +153,13 @@ optionsP noColor =
         OA.value Paths.ghc <>
         OA.metavar "FILE"
       )
+  <*> OA.option absoluteURI
+      ( OA.long "hackage" <>
+        OA.help "The URI of an instance of Hackage repository to use" <>
+        OA.showDefault <>
+        OA.value [uri|https://hackage.haskell.org/|] <>
+        OA.metavar "URI"
+      )
   <*> OA.option path
       ( OA.long "make" <>
         OA.help "The path to the BSD make(1) command" <>
@@ -193,6 +203,9 @@ flagMap = OA.eitherReader f
 
     fa2Map :: C.FlagAssignment -> FlagMap
     fa2Map = M.fromList . C.unFlagAssignment
+
+absoluteURI :: ReadM URI
+absoluteURI = OA.maybeReader parseURI
 
 uriReference :: ReadM URI
 uriReference = OA.maybeReader parseURIReference
@@ -262,7 +275,8 @@ parseOptions =
     prefs = OA.prefs . mconcat
             $ [ OA.subparserInline
               , OA.helpLongEquals
-              , OA.helpShowGlobals
+                -- We don't know if using OA.helpShowGlobals is a good idea
+                -- or not.
               ]
 
     spec :: Bool -> ParserInfo Options
@@ -441,6 +455,9 @@ ghcVersion
            ghc' = fromJust $ C.lookupProgram ghc progs
            ver  = fromJust $ C.programVersion ghc'
        pure ver
+
+hackageURI :: CLI URI
+hackageURI = optHackage <$> options
 
 installedPkgs :: CLI InstalledPackageIndex
 installedPkgs = CLI (asks ctxIPI) >>= force

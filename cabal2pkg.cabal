@@ -68,6 +68,9 @@ executable cabal2pkg
       , exceptions           ^>= 0.10.7
       , filepath              >= 1.4
       , ghc-paths            ^>= 0.1
+      , http-conduit         ^>= 2.3.8
+      , http-media           ^>= 0.8.1
+      , http-types           ^>= 0.12.4
       , microlens            ^>= 0.4.13
       , microlens-th         ^>= 0.4.3
       , mono-traversable     ^>= 1.0

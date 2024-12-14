@@ -41,7 +41,7 @@ import Text.Show.Pretty (ppShow)
 
 run :: HasCallStack => InitOptions -> CLI ()
 run (InitOptions {..})
-  = do info $ "Reading" <+> PP.dquotes (PP.viaShow optPackageURI) <> "..."
+  = do info $ "Fetching" <+> PP.dquotes (PP.viaShow optPackageURI) <> "..."
 
        cabal <- readCabal optPackageURI
        debug $ "Found a package:\n" <> PP.pretty (ppShow cabal)

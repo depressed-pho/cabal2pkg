@@ -197,10 +197,11 @@ extractFlags givenFlags flags =
   where
     pprPF :: C.PackageFlag -> Doc ann
     pprPF pf =
-      PP.vsep [ (PP.pretty . C.unFlagName . C.flagName $ pf) <> PP.colon
-              , (PP.pretty . C.flagDescription $ pf) <>
-                PP.parens ("default:" <+> PP.pretty (C.flagDefault pf))
-              ]
+      PP.nest 2 . PP.vsep $
+      [ (PP.pretty . C.unFlagName . C.flagName $ pf) <> PP.colon
+      , (PP.pretty . C.flagDescription $ pf) <+>
+        PP.parens ("default:" <+> PP.pretty (C.flagDefault pf))
+      ]
 
     go :: ([C.PackageFlag], FlagMap) -> C.PackageFlag -> ([C.PackageFlag], FlagMap)
     go (defaulted, fa) pf =
