@@ -77,14 +77,17 @@ genAST pm
                                        else
                                          "${DISTNAME:tl}")
                   ]
-             <> [ "CATEGORIES" .= categories pm
-                  -- FIXME: Generate MASTER_SITES here, if the package
-                  -- isn't from Hackage.
-                , blank
+             <> [ "CATEGORIES" .= categories pm ]
+             <> case masterSites pm of
+                  [] -> []
+                  ms -> [ "MASTER_SITES" .= ms ]
+             <> [ blank
                 , "MAINTAINER" .= pure (maintainer pm)
-                  -- FIXME: Generate HOMEPAGE here, if the package isn't
-                  -- from Hackage.
-                , "COMMENT"    .= pure (comment pm)
+                ]
+             <> case homepage pm of
+                  Nothing -> []
+                  Just hp -> [ "HOMEPAGE" .= pure hp ]
+             <> [ "COMMENT"    .= pure (comment pm)
                 , "LICENSE"    .= pure (license pm)
                 , blank
                 ]

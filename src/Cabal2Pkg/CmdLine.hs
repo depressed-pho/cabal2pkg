@@ -46,7 +46,8 @@ module Cabal2Pkg.CmdLine
 import Cabal2Pkg.Static (makeQ)
 import Control.Applicative ((<|>), (<**>), many, optional)
 import Control.Concurrent.Deferred (Deferred, defer, force)
-import Control.Exception.Safe (Exception(..), MonadMask, catch, throw)
+import Control.Exception.Safe
+  ( Exception(..), Handler(..), MonadMask, SomeException, catches, throw )
 import Control.Monad (foldM, unless, when)
 import Control.Monad.Catch (MonadCatch, MonadThrow)
 import Control.Monad.Fix (MonadFix)
@@ -75,7 +76,7 @@ import Distribution.Types.Flag qualified as C
 import Distribution.Types.Version (Version)
 import Distribution.Verbosity (silent)
 import GHC.Paths.OsPath qualified as Paths
-import Network.URI (URI, parseURI, parseURIReference)
+import Network.URI (URI, parseAbsoluteURI, parseURIReference)
 import Network.URI.Static (uri)
 import Options.Applicative (Parser, ParserInfo, ParserPrefs, ReadM)
 import Options.Applicative qualified as OA
@@ -212,7 +213,7 @@ flagMap = OA.eitherReader f
     fa2Map = M.fromList . C.unFlagAssignment
 
 absoluteURI :: ReadM URI
-absoluteURI = OA.maybeReader parseURI
+absoluteURI = OA.maybeReader parseAbsoluteURI
 
 uriReference :: ReadM URI
 uriReference = OA.maybeReader parseURIReference
@@ -229,9 +230,9 @@ data InitOptions
     }
   deriving (Show)
 
-data UpdateOptions
+newtype UpdateOptions
   = UpdateOptions
-    { optPackageURI :: !(Maybe URI)
+    { optPackageURI :: Maybe URI
     }
   deriving (Show)
 
@@ -420,11 +421,16 @@ runCLI m =
   do opts <- parseOptions
      ctx  <- initialCtx opts
      runResourceT (runReaderT (unCLI m) ctx)
-       `catch`
-       \(e :: CommandError) ->
-         do useColour <- pure . ctxUseColour $ ctx
-            print' useColour $ msgDoc e
-            exitWith (ExitFailure 1)
+       `catches`
+       [ Handler $ \(e :: CommandError) ->
+           do useColour <- pure . ctxUseColour $ ctx
+              print' useColour $ msgDoc e
+              exitWith (ExitFailure 1)
+       , Handler $ \(e :: SomeException) ->
+           do useColour <- pure . ctxUseColour $ ctx
+              print' useColour . msgDoc . CommandError $ PP.viaShow e
+              exitWith (ExitFailure 1)
+       ]
   where
     msgDoc :: CommandError -> Doc AnsiStyle
     msgDoc e =

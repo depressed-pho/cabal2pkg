@@ -90,7 +90,6 @@ genAST pm =
         abiDepends = var .+= [pat]
           where
             var = AST.Variable $ "BUILDLINK_ABI_DEPENDS." <> pkgBase pm
-            -- FIXME: We should take PKGREVISION into account in "cabal2pkg update".
             pat = pkgBase pm <> "==" <> T.pack (prettyShow $ distVersion pm)
 
         pkgsrcDir :: Block

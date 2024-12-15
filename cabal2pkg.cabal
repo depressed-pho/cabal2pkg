@@ -33,6 +33,7 @@ executable cabal2pkg
     other-modules:
         Cabal2Pkg.Cabal
         Cabal2Pkg.CmdLine
+        Cabal2Pkg.Command.Common
         Cabal2Pkg.Command.Init
         Cabal2Pkg.Command.Update
         Cabal2Pkg.Extractor

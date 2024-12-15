@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedLists #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 module Database.Pkgsrc.SrcDb
@@ -7,14 +8,21 @@ module Database.Pkgsrc.SrcDb
   , Category
   , Package
   , createSrcDb
+  , distDir
   , findPackageByPath
   , findPackageByName
   , findPackageByNameCI
 
     -- Accessors
   , pkgPath
+  , distName
+  , distSubDir
   , pkgName
   , pkgVersionNoRev
+  , pkgRevision
+  , extractSufx
+  , maintainer
+  , masterSites
   , includesHaskellMk
   ) where
 
@@ -38,18 +46,20 @@ import Data.Text.Encoding qualified as T
 import Data.Text.IO.Utf8 qualified as U8
 import Data.Text.Read qualified as TR
 import GHC.Stack (HasCallStack)
+import Network.URI (URI, parseAbsoluteURI)
 import System.Directory.OsPath
   ( doesDirectoryExist, doesFileExist, listDirectory )
 import System.IO (hClose)
-import System.OsPath ((</>), OsPath, OsString)
+import System.OsPath ((</>), OsPath, OsString, osp)
 import System.OsPath qualified as OP
 import System.Process.Typed qualified as PT
 import UnliftIO.Async (mapConcurrently)
 
 
-newtype SrcDb m
+data SrcDb m
   = SrcDb
-    { categories :: HashMap Text (Deferred m (Category m))
+    { categories :: !(HashMap Text (Deferred m (Category m)))
+    , distDir    :: !(Deferred m Text)
     }
 
 -- |A category of pkgsrc packages. It has nothing to do with category
@@ -63,98 +73,136 @@ data Category m
 data Package m
   = Package
     { pPKGPATH           :: Text
+    , pDISTNAME          :: Deferred m OsString
+    , pDIST_SUBDIR       :: Deferred m (Maybe OsPath)
     , pPKGNAME           :: Deferred m Text
     , pPKGVERSION_NOREV  :: Deferred m Text
     , pPKGREVISION       :: Deferred m (Maybe Int)
+    , pEXTRACT_SUFX      :: Deferred m OsString
     , pMAINTAINER        :: Deferred m Text
+    , pMASTER_SITES      :: Deferred m [URI]
     , pIncludesHaskellMk :: Deferred m Bool
     }
 
 type VarMap = HashMap Text Text
 
-newtype Getter a = Getter { runGetter :: VarMap -> Either String a }
-  deriving Functor
+newtype Getter a = Getter { runGetter :: Text -> Either String a }
+
+instance Functor Getter where
+  fmap :: (a -> b) -> Getter a -> Getter b
+  fmap f (Getter g) = Getter $ (f <$>) . g
 
 instance Applicative Getter where
+  pure :: a -> Getter a
   pure = Getter . const . Right
 
-  Getter fab <*> Getter fa =
-    Getter $ \vm ->
-    case fa vm of
-      Left  e -> Left e
-      Right a -> case fab vm of
-                   Left  e'   -> Left e'
-                   Right fab' -> Right (fab' a)
-
-instance Monad Getter where
-  Getter fa >>= fab =
-    Getter $ \vm ->
-    case fa vm of
-      Left  e -> Left e
-      Right a -> runGetter (fab a) vm
-
-instance MonadFail Getter where
-  fail = Getter . const . Left
+  liftA2 :: (a -> b -> c) -> Getter a -> Getter b -> Getter c
+  liftA2 f g1 g2 =
+    Getter $ \txt ->
+    do a <- runGetter g1 txt
+       b <- runGetter g2 txt
+       pure (f a b)
 
 instance Alternative Getter where
-  empty = fail "empty"
+  empty :: Getter a
+  empty = Getter . const . Left $ "empty"
 
-  Getter fa <|> Getter fb =
-    Getter $ \vm ->
-    case fa vm of
-      Left  _ -> fb vm
-      Right a -> Right a
+  (<|>) :: Getter a -> Getter a -> Getter a
+  g1 <|> g2 =
+    Getter $ \txt ->
+    case runGetter g1 txt of
+      Left _ -> runGetter g2 txt
+      r      -> r
 
-get :: HasCallStack => Getter a -> VarMap -> a
-get (Getter fa) vm =
-  case fa vm of
-    Left  e -> error e
-    Right a -> a
+  some :: Getter a -> Getter [a]
+  some g =
+    Getter $ \txt ->
+    case runGetter (many g) txt of
+      Right [] -> Left "variable empty or undefined"
+      r        -> r
 
-exists :: Text -> Getter Bool
-exists = Getter . (Right .) . HM.member
+  many :: forall a. Getter a -> Getter [a]
+  many g = Getter $ go . T.words
+    where
+      go :: [Text] -> Either String [a]
+      go []     = Right []
+      go (w:ws) = case runGetter g w of
+                    Left  e -> Left e
+                    Right a -> (a :) <$> go ws
 
-text :: Text -> Getter Text
-text name =
-  Getter $ \vm ->
-  case HM.lookup name vm of
-    Nothing -> Left $ T.unpack name <> ": variable not found"
-    Just v  -> Right v
+get :: HasCallStack => Text -> Getter a -> VarMap -> a
+get var g vm =
+  case HM.lookup var vm of
+    Nothing  -> error $ T.unpack var <> ": variable not found"
+    Just txt -> case runGetter g txt of
+                  Left  e -> error $ T.unpack var <> ": " <> e
+                  Right a -> a
 
-int :: Text -> Getter Int
-int name =
-  do val <- text name
-     case TR.decimal val of
-       Right (n, r)
-         | T.null r  -> pure n
-         | otherwise -> fail $ T.unpack name <> ": " <> "not a decimal number: " <> T.unpack val
-       Left e ->
-         fail $ T.unpack name <> ": " <> e
+exists :: Getter Bool
+exists = Getter $ Right . not . T.null
+
+text :: Getter Text
+text = Getter Right
+
+-- |This doesn't accept an empty string.
+osStr :: Getter OsString
+osStr =
+  Getter $ \txt ->
+  if T.null txt then
+    Left "variable empty or undefined"
+  else
+    either (Left . show) Right . OP.encodeUtf . T.unpack $ txt
+
+uri :: Getter URI
+uri =
+  Getter $ \txt ->
+  case parseAbsoluteURI . T.unpack $ txt of
+    Nothing -> Left $ "not an absolute URI: " <> T.unpack txt
+    Just u  -> Right u
+
+int :: Getter Int
+int =
+  Getter $ \txt ->
+  case TR.decimal txt of
+    Right (n, r)
+      | T.null r  -> Right n
+      | otherwise -> Left $ "not a decimal number: " <> T.unpack txt
+    Left e ->
+      Left e
 
 -- |Create a database of pkgsrc packages.
-createSrcDb :: (MonadThrow m, MonadUnliftIO m)
+createSrcDb :: forall m.
+               (MonadThrow m, MonadUnliftIO m)
             => OsPath -- ^The path to BSD make(1) command.
             -> OsPath -- ^The root directory of pkgsrc tree, typically @/usr/pkgsrc@.
             -> m (SrcDb m)
-createSrcDb makePath root = SrcDb <$> go
+createSrcDb makePath root = SrcDb <$> cats <*> dists
   where
-    go :: (MonadThrow m, MonadUnliftIO m) => m (HashMap Text (Deferred m (Category m)))
-    go = liftIO (listDirectory root)
-         >>= filterCats root
-         >>= (HM.fromList <$>) . mapM deferCat
+    cats :: m (HashMap Text (Deferred m (Category m)))
+    cats = liftIO (listDirectory root)
+           >>= filterCats root
+           >>= (HM.fromList <$>) . mapM deferCat
 
-    deferCat :: (MonadThrow m, MonadUnliftIO m) => OsString -> m (Text, Deferred m (Category m))
-    deferCat catName
-      = (,) <$> (T.pack <$> OP.decodeUtf catName)
-            <*> defer (mkCat catName)
+    deferCat :: OsString -> m (Text, Deferred m (Category m))
+    deferCat catName =
+      (,) <$> (T.pack <$> OP.decodeUtf catName)
+          <*> defer (mkCat catName)
 
-    mkCat :: (MonadThrow m, MonadUnliftIO m) => OsString -> m (Category m)
-    mkCat catName
-      = do pkgs <- scanPkgs makePath root catName
-           pure Category
-             { packages   = pkgs
-             , packagesCI = HM.mapKeys CI.mk pkgs
-             }
+    mkCat :: OsString -> m (Category m)
+    mkCat catName =
+      do pkgs <- scanPkgs makePath root catName
+         pure Category
+           { packages   = pkgs
+           , packagesCI = HM.mapKeys CI.mk pkgs
+           }
+
+    dists :: m (Deferred m Text)
+    dists =
+      do let dirPath = root </> [osp|pkgtools|] </> [osp|pkg_install|] -- Any package will do.
+         vars <- defer $ getMakeVars makePath dirPath
+                           [ "DISTDIR"
+                           ]
+         pure $ get "DISTDIR" text <$> vars
 {-# ANN createSrcDb ("HLint: ignore Functor law" :: String) #-}
 
 os :: String -> OsString
@@ -211,49 +259,63 @@ scanPkgs makePath root catName
     mkPkg :: OsString -> m (Package m)
     mkPkg dirName
       = do let dirPath = catPath </> dirName
-           pkgPathTS <- T.pack <$> OP.decodeUtf (catName </> dirName)
-           vars      <- defer $ getMakeVars dirPath [ "HASKELL_PKG_NAME"
-                                                    , "MAINTAINER"
-                                                    , "PKGNAME"
-                                                    , "PKGREVISION"
-                                                    , "PKGVERSION_NOREV"
-                                                    ]
+           pkgPathTxt <- T.pack <$> OP.decodeUtf (catName </> dirName)
+           vars       <- defer $ getMakeVars makePath dirPath
+                                   [ "DISTNAME"
+                                   , "DIST_SUBDIR"
+                                   , "PKGNAME"
+                                   , "PKGVERSION_NOREV"
+                                   , "PKGREVISION"
+                                   , "EXTRACT_SUFX"
+                                   , "MAINTAINER"
+                                   , "MASTER_SITES"
+                                   , "HASKELL_PKG_NAME"
+                                   ]
            pure Package
-             { pPKGPATH           = pkgPathTS
-             , pPKGNAME           = get (text "PKGNAME"           ) <$> vars
-             , pPKGVERSION_NOREV  = get (text "PKGVERSION_NOREV"  ) <$> vars
-             , pPKGREVISION       = get (optional $ int "PKGREVISION") <$> vars
-             , pMAINTAINER        = get (text "MAINTAINER"        ) <$> vars
-             , pIncludesHaskellMk = get (exists "HASKELL_PKG_NAME") <$> vars
+             { pPKGPATH           = pkgPathTxt
+             , pDISTNAME          = get "DISTNAME"         osStr            <$> vars
+             , pDIST_SUBDIR       = get "DIST_SUBDIR"      (optional osStr) <$> vars
+             , pPKGNAME           = get "PKGNAME"          text             <$> vars
+             , pPKGVERSION_NOREV  = get "PKGVERSION_NOREV" text             <$> vars
+             , pPKGREVISION       = get "PKGREVISION"      (optional int)   <$> vars
+             , pEXTRACT_SUFX      = get "EXTRACT_SUFX"     osStr            <$> vars
+             , pMAINTAINER        = get "MAINTAINER"       text             <$> vars
+             , pMASTER_SITES      = get "MASTER_SITES"     (many uri)       <$> vars
+             , pIncludesHaskellMk = get "HASKELL_PKG_NAME" exists           <$> vars
              }
-
-    -- |This is obviously the slowest part of cabal2pkg. Parallelise calls
-    -- of it at all costs.
-    getMakeVars :: OsPath -> HashSet Text -> m VarMap
-    getMakeVars dirPath vars
-      = do make' <- OP.decodeUtf makePath
-           dir'  <- OP.decodeUtf dirPath
-           let conf = PT.setStdin PT.createPipe
-                    . PT.setStdout PT.byteStringOutput
-                    . PT.setWorkingDir dir'
-                    $ PT.proc make' ["-f", "-", "-f", "Makefile", "x"]
-           PT.withProcessWait_ conf $ \p ->
-             liftIO $
-             do let stdin = PT.getStdin p
-                    vars' = HS.toList vars
-                U8.hPutStrLn stdin ".PHONY: x"
-                U8.hPutStrLn stdin "x:"
-                forM_ vars' $ \var ->
-                  do U8.hPutStr stdin "\t@printf '%s\\0' \"${"
-                     U8.hPutStr stdin var
-                     U8.hPutStrLn stdin "}\""
-                hClose stdin
-
-                out <- either throw pure . T.decodeUtf8' . BL.toStrict
-                       =<< atomically (PT.getStdout p)
-                let vals = T.split (== '\0') out
-                pure . HM.fromList $ zip vars' vals
 {-# ANN scanPkgs ("HLint: ignore Functor law" :: String) #-}
+
+-- |Extract a set of variables from a Makefile in an absolute path to a
+-- package directory. This is obviously the slowest part of
+-- cabal2pkg. Parallelise calls of it at all costs.
+getMakeVars :: (MonadThrow m, MonadUnliftIO m)
+            => OsPath
+            -> OsPath
+            -> HashSet Text
+            -> m VarMap
+getMakeVars makePath dirPath vars
+  = do make' <- OP.decodeUtf makePath
+       dir'  <- OP.decodeUtf dirPath
+       let conf = PT.setStdin PT.createPipe
+                  . PT.setStdout PT.byteStringOutput
+                  . PT.setWorkingDir dir'
+                  $ PT.proc make' ["-f", "-", "-f", "Makefile", "x"]
+       PT.withProcessWait_ conf $ \p ->
+         liftIO $
+         do let stdin = PT.getStdin p
+                vars' = HS.toList vars
+            U8.hPutStrLn stdin ".PHONY: x"
+            U8.hPutStrLn stdin "x:"
+            forM_ vars' $ \var ->
+              do U8.hPutStr stdin "\t@printf '%s\\0' \"${"
+                 U8.hPutStr stdin var
+                 U8.hPutStrLn stdin "}\""
+            hClose stdin
+
+            out <- either throw pure . T.decodeUtf8' . BL.toStrict
+                   =<< atomically (PT.getStdout p)
+            let vals = T.split (== '\0') out
+            pure . HM.fromList $ zip vars' vals
 
 -- |Only include directories that has a Makefile.
 filterPkgs :: MonadUnliftIO m => OsPath -> [OsString] -> m [OsString]
@@ -318,11 +380,29 @@ findPackageCommon (SrcDb {..}) q
 pkgPath :: Package m -> Text
 pkgPath = pPKGPATH
 
+distName :: MonadUnliftIO m => Package m -> m OsString
+distName = force . pDISTNAME
+
+distSubDir :: MonadUnliftIO m => Package m -> m (Maybe OsString)
+distSubDir = force . pDIST_SUBDIR
+
 pkgName :: MonadUnliftIO m => Package m -> m Text
 pkgName = force . pPKGNAME
 
 pkgVersionNoRev :: MonadUnliftIO m => Package m -> m Text
 pkgVersionNoRev = force . pPKGVERSION_NOREV
+
+pkgRevision :: MonadUnliftIO m => Package m -> m (Maybe Int)
+pkgRevision = force . pPKGREVISION
+
+extractSufx :: MonadUnliftIO m => Package m -> m OsString
+extractSufx = force . pEXTRACT_SUFX
+
+maintainer :: MonadUnliftIO m => Package m -> m Text
+maintainer = force . pMAINTAINER
+
+masterSites :: MonadUnliftIO m => Package m -> m [URI]
+masterSites = force . pMASTER_SITES
 
 includesHaskellMk :: MonadUnliftIO m => Package m -> m Bool
 includesHaskellMk = force . pIncludesHaskellMk

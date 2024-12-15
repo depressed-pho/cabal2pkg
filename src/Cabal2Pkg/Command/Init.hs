@@ -5,13 +5,12 @@ module Cabal2Pkg.Command.Init
   ( run
   ) where
 
-import Cabal2Pkg.Cabal (readCabal)
 import Cabal2Pkg.CmdLine
   ( CLI, InitOptions(..), debug, fatal, info, canonPkgDir, origPkgDir
   , makeCmd, pkgBase, runMake )
+import Cabal2Pkg.Command.Common (fetchMeta)
 import Cabal2Pkg.Extractor
-  ( PackageMeta(distBase), hasLibraries, hasExecutables, hasForeignLibs
-  , summariseCabal )
+  ( PackageMeta(distBase), hasLibraries, hasExecutables, hasForeignLibs )
 import Cabal2Pkg.Generator.Buildlink3 (genBuildlink3)
 import Cabal2Pkg.Generator.Description (genDESCR)
 import Cabal2Pkg.Generator.Makefile (genMakefile)
@@ -35,17 +34,10 @@ import System.File.OsPath.Alt (writeFile, writeFreshFile)
 import System.IO.Error (isAlreadyExistsError)
 import System.OsPath ((</>), OsPath, osp)
 import System.OsPath qualified as OP
-import Text.Show.Pretty (ppShow)
 
 run :: HasCallStack => InitOptions -> CLI ()
 run (InitOptions {..}) =
-  do info $ "Fetching" <+> PP.dquotes (PP.viaShow optPackageURI) <> "..."
-
-     cabal <- readCabal optPackageURI
-     debug $ "Found a package:\n" <> PP.pretty (ppShow cabal)
-
-     meta <- summariseCabal cabal
-     debug $ "Summarised package metadata:\n" <> PP.pretty (ppShow meta)
+  do meta <- fetchMeta optPackageURI
 
      canonDir <- canonPkgDir
      validatePkgPath meta

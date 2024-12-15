@@ -2,7 +2,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
 module Cabal2Pkg.Cabal
-  ( readCabal
+  ( isFromHackage
+  , readCabal
   ) where
 
 import Cabal2Pkg.CmdLine (CLI, hackageURI, fatal, warn)
@@ -16,6 +17,7 @@ import Data.Conduit.Combinators (sinkLazy, sourceFile)
 import Data.Conduit.Combinators qualified as C
 import Data.Conduit.Tar (FileInfo(filePath), untar)
 import Data.Conduit.Zlib (ungzip)
+import Data.List qualified as L
 import Data.Text qualified as T
 import Data.Text.Encoding (decodeUtf8Lenient)
 import Distribution.PackageDescription.Parsec qualified as DPP
@@ -32,7 +34,7 @@ import Network.HTTP.Media (MediaType)
 import Network.HTTP.Media qualified as MT
 import Network.HTTP.Types
   ( hContentType, statusCode, statusMessage, statusIsSuccessful )
-import Network.URI (URI(..), uriToString)
+import Network.URI (URI(..), pathSegments, uriToString)
 import Network.URI.Lens (uriPathLens)
 import PackageInfo_cabal2pkg qualified as PI
 import Prelude hiding (pi)
@@ -79,6 +81,19 @@ readCabal uri =
     warn' path w =
       do path' <- OPP.decodeUtf path
          warn . PP.pretty $ showPWarning path' w
+
+isFromHackage :: URI -> CLI Bool
+isFromHackage uri =
+  case uriScheme uri of
+    "" -> pure True
+    _  -> do hackage <- hackageURI
+             pure $ hackage `isPrefixOf` uri
+  where
+    isPrefixOf :: URI -> URI -> Bool
+    isPrefixOf a b =
+      uriScheme    a == uriScheme    b &&
+      uriAuthority a == uriAuthority b &&
+      (pathSegments a <> ["package"]) `L.isPrefixOf` pathSegments b
 
 fetchCabal :: (MonadResource m, MonadThrow m, PrimMonad m)
            => URI -- ^Hackage URI
@@ -224,7 +239,7 @@ fetchHackage hackage (uriPath -> packageId) =
         Nothing -> False
         Just mt -> MT.mainType mt == "text"  &&
                    MT.subType  mt == "plain" &&
-                   any (== mt MT./. "charset") [Nothing, Just "utf-8"]
+                   elem (mt MT./. "charset") [Nothing, Just "utf-8"]
 
 fetchUnknown :: MonadThrow m => m a
 fetchUnknown =

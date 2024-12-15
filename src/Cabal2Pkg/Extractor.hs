@@ -2,6 +2,8 @@
 module Cabal2Pkg.Extractor
   ( PackageMeta(..)
   , summariseCabal
+  , omitHackageDefaults
+  , fillInMasterSites
   , hasLibraries
   , hasForeignLibs
   , hasExecutables
@@ -25,7 +27,10 @@ import Distribution.Types.PackageId qualified as C
 import Distribution.Types.PackageName qualified as C
 import Distribution.Types.Version (Version)
 import Distribution.Utils.ShortText qualified as ST
+import GHC.Stack (HasCallStack)
 import Lens.Micro ((^.))
+import Network.URI (URI(uriScheme, uriPath), uriIsAbsolute, uriToString)
+import System.FilePath.Posix qualified as FP
 
 
 data PackageMeta = PackageMeta
@@ -33,9 +38,12 @@ data PackageMeta = PackageMeta
   , distVersion :: !Version
   , pkgBase     :: !Text
   , pkgPath     :: !Text
-  , pkgRevision :: !(Maybe Int)
   , categories  :: ![Text]
+    -- ^@[]@ means it's in Hackage
+  , masterSites :: ![Text]
   , maintainer  :: !Text
+    -- ^@Nothing@ means it's in Hackage
+  , homepage    :: !(Maybe Text)
   , comment     :: !Text
   , description :: !Text
   , license     :: !Text
@@ -61,9 +69,10 @@ summariseCabal gpd
          , distVersion = C.pkgVersion . PD.package $ pd
          , pkgBase     = base
          , pkgPath     = path
-         , pkgRevision = Nothing
          , categories  = [cat]
+         , masterSites = []
          , maintainer  = fromMaybe "pkgsrc-users@NetBSD.org" mtr
+         , homepage    = Just . T.pack . ST.fromShortText . PD.homepage $ pd
          , comment     = T.pack . ST.fromShortText . PD.synopsis $ pd
          , description = extractDescription pd
          , license     = extractLicense pd
@@ -90,6 +99,27 @@ extractDescription pd =
         T.pack . ST.fromShortText $ synop
     else
       T.pack . ST.fromShortText $ descr
+
+omitHackageDefaults :: PackageMeta -> PackageMeta
+omitHackageDefaults pm =
+  pm { masterSites = []
+     , homepage    = Nothing
+     }
+
+fillInMasterSites :: HasCallStack => URI -> PackageMeta -> PackageMeta
+fillInMasterSites uri pm
+  | uriIsAbsolute uri =
+      case uriScheme uri of
+        "file" -> invalid
+        _      -> let path' = FP.dropFileName . uriPath $ uri
+                      uri'  = uri { uriPath = path' }
+                  in
+                    pm { masterSites = pure . T.pack $ uriToString id uri' "" }
+  | otherwise =
+      invalid
+  where
+    invalid :: HasCallStack => a
+    invalid = error ("Cannot fill in MASTER_SITES for URI: " <> show uri)
 
 hasLibraries :: PackageMeta -> Bool
 hasLibraries
