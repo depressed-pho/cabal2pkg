@@ -7,8 +7,9 @@ module Database.Pkgsrc.SrcDb
   , Category
   , Package
   , createSrcDb
-  , findPackage
-  , findPackageCI
+  , findPackageByPath
+  , findPackageByName
+  , findPackageByNameCI
 
     -- Accessors
   , pkgPath
@@ -17,7 +18,7 @@ module Database.Pkgsrc.SrcDb
   , includesHaskellMk
   ) where
 
-import Control.Applicative (asum)
+import Control.Applicative (Alternative(..), asum, optional)
 import Control.Concurrent.Deferred (Deferred, defer, force)
 import Control.Concurrent.STM (atomically)
 import Control.Exception.Safe (MonadThrow, throw)
@@ -35,6 +36,8 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as T
 import Data.Text.IO.Utf8 qualified as U8
+import Data.Text.Read qualified as TR
+import GHC.Stack (HasCallStack)
 import System.Directory.OsPath
   ( doesDirectoryExist, doesFileExist, listDirectory )
 import System.IO (hClose)
@@ -62,9 +65,71 @@ data Package m
     { pPKGPATH           :: Text
     , pPKGNAME           :: Deferred m Text
     , pPKGVERSION_NOREV  :: Deferred m Text
+    , pPKGREVISION       :: Deferred m (Maybe Int)
+    , pMAINTAINER        :: Deferred m Text
     , pIncludesHaskellMk :: Deferred m Bool
     }
 
+type VarMap = HashMap Text Text
+
+newtype Getter a = Getter { runGetter :: VarMap -> Either String a }
+  deriving Functor
+
+instance Applicative Getter where
+  pure = Getter . const . Right
+
+  Getter fab <*> Getter fa =
+    Getter $ \vm ->
+    case fa vm of
+      Left  e -> Left e
+      Right a -> case fab vm of
+                   Left  e'   -> Left e'
+                   Right fab' -> Right (fab' a)
+
+instance Monad Getter where
+  Getter fa >>= fab =
+    Getter $ \vm ->
+    case fa vm of
+      Left  e -> Left e
+      Right a -> runGetter (fab a) vm
+
+instance MonadFail Getter where
+  fail = Getter . const . Left
+
+instance Alternative Getter where
+  empty = fail "empty"
+
+  Getter fa <|> Getter fb =
+    Getter $ \vm ->
+    case fa vm of
+      Left  _ -> fb vm
+      Right a -> Right a
+
+get :: HasCallStack => Getter a -> VarMap -> a
+get (Getter fa) vm =
+  case fa vm of
+    Left  e -> error e
+    Right a -> a
+
+exists :: Text -> Getter Bool
+exists = Getter . (Right .) . HM.member
+
+text :: Text -> Getter Text
+text name =
+  Getter $ \vm ->
+  case HM.lookup name vm of
+    Nothing -> Left $ T.unpack name <> ": variable not found"
+    Just v  -> Right v
+
+int :: Text -> Getter Int
+int name =
+  do val <- text name
+     case TR.decimal val of
+       Right (n, r)
+         | T.null r  -> pure n
+         | otherwise -> fail $ T.unpack name <> ": " <> "not a decimal number: " <> T.unpack val
+       Left e ->
+         fail $ T.unpack name <> ": " <> e
 
 -- |Create a database of pkgsrc packages.
 createSrcDb :: (MonadThrow m, MonadUnliftIO m)
@@ -118,9 +183,9 @@ filterCats root = (catMaybes <$>) . mapConcurrently go
 
     includesCatMk :: (MonadIO m, MonadThrow m) => OsPath -> m Bool
     includesCatMk file
-      = do fp   <- OP.decodeUtf file
-           text <- liftIO $ U8.readFile fp
-           case T.breakOnAll "\"../mk/misc/category.mk\"" text of
+      = do fp  <- OP.decodeUtf file
+           txt <- liftIO $ U8.readFile fp
+           case T.breakOnAll "\"../mk/misc/category.mk\"" txt of
              [] -> pure False
              _  -> pure True
 
@@ -148,21 +213,23 @@ scanPkgs makePath root catName
       = do let dirPath = catPath </> dirName
            pkgPathTS <- T.pack <$> OP.decodeUtf (catName </> dirName)
            vars      <- defer $ getMakeVars dirPath [ "HASKELL_PKG_NAME"
+                                                    , "MAINTAINER"
                                                     , "PKGNAME"
+                                                    , "PKGREVISION"
                                                     , "PKGVERSION_NOREV"
                                                     ]
            pure Package
              { pPKGPATH           = pkgPathTS
-             , pPKGNAME           = (HM.! "PKGNAME"         ) <$> vars
-             , pPKGVERSION_NOREV  = (HM.! "PKGVERSION_NOREV") <$> vars
-             , pIncludesHaskellMk = HM.member "HASKELL_PKG_NAME" <$> vars
+             , pPKGNAME           = get (text "PKGNAME"           ) <$> vars
+             , pPKGVERSION_NOREV  = get (text "PKGVERSION_NOREV"  ) <$> vars
+             , pPKGREVISION       = get (optional $ int "PKGREVISION") <$> vars
+             , pMAINTAINER        = get (text "MAINTAINER"        ) <$> vars
+             , pIncludesHaskellMk = get (exists "HASKELL_PKG_NAME") <$> vars
              }
 
     -- |This is obviously the slowest part of cabal2pkg. Parallelise calls
     -- of it at all costs.
-    getMakeVars :: OsPath
-                -> HashSet Text
-                -> m (HashMap Text Text)
+    getMakeVars :: OsPath -> HashSet Text -> m VarMap
     getMakeVars dirPath vars
       = do make' <- OP.decodeUtf makePath
            dir'  <- OP.decodeUtf dirPath
@@ -203,17 +270,39 @@ filterPkgs catPath = (catMaybes <$>) . mapConcurrently go
                        else pure Nothing
              else pure Nothing
 
+-- |Search for a package by a PKGPATH e.g. @"devel/hs-lens"
+findPackageByPath :: MonadUnliftIO m => SrcDb m -> Text -> m (Maybe (Package m))
+findPackageByPath (SrcDb {..}) path =
+  case readPkgPath path of
+    Left _ ->
+      pure Nothing
+    Right ((cat, name), _) ->
+      case HM.lookup cat categories of
+        Nothing  -> pure Nothing
+        Just dps ->
+          do ps <- force dps
+             case HM.lookup name (packages ps) of
+               Nothing -> pure Nothing
+               Just dp -> Just <$> force dp
+
+readPkgPath :: TR.Reader (Text, Text)
+readPkgPath path =
+  case T.break (== '/') path of
+    (cat, slashName)
+      | not (T.null slashName) -> Right ((cat, T.tail slashName), "")
+    _ -> Left (T.unpack path <> ": not a PKGPATH")
+
 -- |Search for a package that exactly matches with the given name. The
 -- search is performed against the name of directories but not against
 -- @PKGNAME@'s.
-findPackage :: MonadUnliftIO m => SrcDb m -> Text -> m (Maybe (Package m))
-findPackage db name
-  = findPackageCommon db (HM.lookup name . packages)
+findPackageByName :: MonadUnliftIO m => SrcDb m -> Text -> m (Maybe (Package m))
+findPackageByName db name =
+  findPackageCommon db (HM.lookup name . packages)
 
 -- |A variant of 'findPackage' but performs search case-insensitively.
-findPackageCI :: MonadUnliftIO m => SrcDb m -> Text -> m (Maybe (Package m))
-findPackageCI db name
-  = findPackageCommon db (HM.lookup (CI.mk name) . packagesCI)
+findPackageByNameCI :: MonadUnliftIO m => SrcDb m -> Text -> m (Maybe (Package m))
+findPackageByNameCI db name =
+  findPackageCommon db (HM.lookup (CI.mk name) . packagesCI)
 
 findPackageCommon :: forall m.
                      MonadUnliftIO m

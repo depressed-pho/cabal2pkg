@@ -26,8 +26,6 @@ import Distribution.Types.PackageName qualified as C
 import Distribution.Types.Version (Version)
 import Distribution.Utils.ShortText qualified as ST
 import Lens.Micro ((^.))
-import System.OsPath (OsPath)
-import System.OsPath qualified as OP
 
 
 data PackageMeta = PackageMeta
@@ -35,6 +33,7 @@ data PackageMeta = PackageMeta
   , distVersion :: !Version
   , pkgBase     :: !Text
   , pkgPath     :: !Text
+  , pkgRevision :: !(Maybe Int)
   , categories  :: ![Text]
   , maintainer  :: !Text
   , comment     :: !Text
@@ -46,12 +45,14 @@ data PackageMeta = PackageMeta
   }
   deriving (Data, Show)
 
-
+-- |Construct a 'PackageMeta' from a given package description. This
+-- function does not take account of the current state of the PKGPATH, that
+-- is, it doesn't read its @Makefile@ even if it exists.
 summariseCabal :: GenericPackageDescription -> CLI PackageMeta
 summariseCabal gpd
-  = do path     <- T.pack <$> (OP.decodeUtf . takeCatAndName  =<< CLI.canonPkgPath)
-       base     <- T.pack <$> (OP.decodeUtf . OP.takeFileName =<< CLI.canonPkgPath)
-       cat      <- CLI.category
+  = do path     <- CLI.pkgPath
+       base     <- CLI.pkgBase
+       cat      <- CLI.pkgCategory
        mtr      <- CLI.maintainer
        fs       <- CLI.pkgFlags
        (cs, ts) <- extractComponents gpd
@@ -60,6 +61,7 @@ summariseCabal gpd
          , distVersion = C.pkgVersion . PD.package $ pd
          , pkgBase     = base
          , pkgPath     = path
+         , pkgRevision = Nothing
          , categories  = [cat]
          , maintainer  = fromMaybe "pkgsrc-users@NetBSD.org" mtr
          , comment     = T.pack . ST.fromShortText . PD.synopsis $ pd
@@ -72,9 +74,6 @@ summariseCabal gpd
   where
     pd :: PackageDescription
     pd = GPD.packageDescription gpd
-
-    takeCatAndName :: OsPath -> OsPath
-    takeCatAndName = OP.joinPath . reverse . take 2 . reverse . OP.splitPath
 
 extractDescription :: PackageDescription -> Text
 extractDescription pd =

@@ -89,11 +89,11 @@ findPkgsrcPkg name
        -- concurrently? I'd say no, because most of the time packages
        -- without the prefix "hs-" is what we would find, and the other
        -- search would just be a waste of CPU cycles.
-       p0 <- SrcDb.findPackageCI db name'
+       p0 <- SrcDb.findPackageByNameCI db name'
        case p0 of
          Just p  -> found p
          Nothing ->
-           do p1 <- SrcDb.findPackageCI db ("hs-" <> name')
+           do p1 <- SrcDb.findPackageByNameCI db ("hs-" <> name')
               join <$> traverse found p1
   where
     name' :: Text

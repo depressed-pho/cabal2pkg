@@ -7,8 +7,8 @@ module Cabal2Pkg.Command.Init
 
 import Cabal2Pkg.Cabal (readCabal)
 import Cabal2Pkg.CmdLine
-  ( CLI, InitOptions(..), debug, fatal, info, canonPkgPath, origPkgPath
-  , makeCmd, runMake )
+  ( CLI, InitOptions(..), debug, fatal, info, canonPkgDir, origPkgDir
+  , makeCmd, pkgBase, runMake )
 import Cabal2Pkg.Extractor
   ( PackageMeta(distBase), hasLibraries, hasExecutables, hasForeignLibs
   , summariseCabal )
@@ -17,12 +17,10 @@ import Cabal2Pkg.Generator.Description (genDESCR)
 import Cabal2Pkg.Generator.Makefile (genMakefile)
 import Control.Exception.Safe (catch, throw)
 import Control.Monad (when)
-import Control.Monad.Catch (MonadThrow)
 import Control.Monad.IO.Unlift (liftIO)
 import Data.ByteString.Lazy qualified as LBS
 import Data.CaseInsensitive qualified as CI
 import Data.Text (Text)
-import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
 import Data.Text.Lazy.Encoding qualified as TL
 import GHC.Stack (HasCallStack)
@@ -40,42 +38,42 @@ import System.OsPath qualified as OP
 import Text.Show.Pretty (ppShow)
 
 run :: HasCallStack => InitOptions -> CLI ()
-run (InitOptions {..})
-  = do info $ "Fetching" <+> PP.dquotes (PP.viaShow optPackageURI) <> "..."
+run (InitOptions {..}) =
+  do info $ "Fetching" <+> PP.dquotes (PP.viaShow optPackageURI) <> "..."
 
-       cabal <- readCabal optPackageURI
-       debug $ "Found a package:\n" <> PP.pretty (ppShow cabal)
+     cabal <- readCabal optPackageURI
+     debug $ "Found a package:\n" <> PP.pretty (ppShow cabal)
 
-       meta <- summariseCabal cabal
-       debug $ "Summarised package metadata:\n" <> PP.pretty (ppShow meta)
+     meta <- summariseCabal cabal
+     debug $ "Summarised package metadata:\n" <> PP.pretty (ppShow meta)
 
-       canonPath <- canonPkgPath
-       validatePkgPath meta canonPath
-       liftIO $ createDirectoryIfMissing True canonPath
+     canonDir <- canonPkgDir
+     validatePkgPath meta
+     liftIO $ createDirectoryIfMissing True canonDir
 
-       -- These files are generated from the package description. We don't
-       -- overwrite existing files unless -w is given.
-       let descr = genDESCR meta
-       debug $ "Generated DESCR:\n" <> PP.pretty (TL.strip descr)
-       writeFile' [osp|DESCR|] (TL.encodeUtf8 descr)
+     -- These files are generated from the package description. We don't
+     -- overwrite existing files unless -w is given.
+     let descr = genDESCR meta
+     debug $ "Generated DESCR:\n" <> PP.pretty (TL.strip descr)
+     writeFile' [osp|DESCR|] (TL.encodeUtf8 descr)
 
-       let mk = genMakefile meta
-       debug $ "Generated Makefile:\n" <> PP.pretty (TL.strip mk)
-       writeFile' [osp|Makefile|] (TL.encodeUtf8 mk)
+     let mk = genMakefile meta
+     debug $ "Generated Makefile:\n" <> PP.pretty (TL.strip mk)
+     writeFile' [osp|Makefile|] (TL.encodeUtf8 mk)
 
-       when (shouldHaveBuildlink3 meta /= Just False) $
-         do let bl3 = genBuildlink3 meta
-            debug $ "Generated buildlink3.mk:\n" <> PP.pretty (TL.strip bl3)
-            writeFile' [osp|buildlink3.mk|] (TL.encodeUtf8 bl3)
+     when (shouldHaveBuildlink3 meta /= Just False) $
+       do let bl3 = genBuildlink3 meta
+          debug $ "Generated buildlink3.mk:\n" <> PP.pretty (TL.strip bl3)
+          writeFile' [osp|buildlink3.mk|] (TL.encodeUtf8 bl3)
 
-       -- PLIST cannot be directly generated from the package
-       -- description. If it already exists we leave them unchanged.
-       plist <- initialPLIST
-       createFile' [osp|PLIST|] (TL.encodeUtf8 plist)
+     -- PLIST cannot be directly generated from the package
+     -- description. If it already exists we leave them unchanged.
+     plist <- initialPLIST
+     createFile' [osp|PLIST|] (TL.encodeUtf8 plist)
 
-       -- Generate distinfo, but the only way to do it is to run make(1).
-       info "Generating distinfo..."
-       runMake ["distinfo"]
+     -- Generate distinfo, but the only way to do it is to run make(1).
+     info "Generating distinfo..."
+     runMake ["distinfo"]
   where
     command :: Doc ann
     command = PP.pretty PI.name <+> "init"
@@ -84,8 +82,8 @@ run (InitOptions {..})
     writeFile' name bs =
       do let f | optOverwrite = writeFile
                | otherwise    = writeFreshFile
-         cfp  <- (</> name) <$> canonPkgPath
-         ofp  <- (</> name) <$> origPkgPath
+         cfp  <- (</> name) <$> canonPkgDir
+         ofp  <- (</> name) <$> origPkgDir
          ofp' <- PP.pretty <$> OP.decodeUtf ofp
          f cfp bs `catch` \(e :: IOError) ->
            if isAlreadyExistsError e then
@@ -102,8 +100,8 @@ run (InitOptions {..})
 
     createFile' :: OsPath -> LBS.ByteString -> CLI ()
     createFile' name bs =
-      do cfp  <- (</> name) <$> canonPkgPath
-         ofp  <- (</> name) <$> origPkgPath
+      do cfp  <- (</> name) <$> canonPkgDir
+         ofp  <- (</> name) <$> origPkgDir
          ofp' <- PP.pretty <$> OP.decodeUtf ofp
          ( do writeFreshFile cfp bs
               info $ "Wrote " <> ofp'
@@ -123,9 +121,9 @@ initialPLIST =
        , "@comment TODO: 1. Run \"" <> make <> " print-PLIST\""
        ]
 
-validatePkgPath :: MonadThrow m => PackageMeta -> OsPath -> m ()
-validatePkgPath meta path
-  = do actual <- T.pack <$> (OP.decodeUtf . OP.takeFileName) path
+validatePkgPath :: PackageMeta -> CLI ()
+validatePkgPath meta
+  = do actual <- pkgBase
        let expWoPfx      = CI.foldCase . distBase $ meta
            expWPfx       = "hs-" <> expWoPfx
            expAndAct     :: Text -> Doc AnsiStyle

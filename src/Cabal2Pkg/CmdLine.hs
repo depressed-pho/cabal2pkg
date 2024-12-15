@@ -19,9 +19,11 @@ module Cabal2Pkg.CmdLine
 
     -- * Query
   , command
-  , origPkgPath
-  , canonPkgPath
-  , category
+  , pkgBase
+  , pkgCategory
+  , pkgPath
+  , origPkgDir
+  , canonPkgDir
   , maintainer
   , makeCmd
   , pkgFlags
@@ -102,7 +104,7 @@ data Options
       -- ^'Nothing' denotes @auto@
     , optColour   :: !ColourPref
     , optDebug    :: !Bool
-    , optPkgPath  :: !OsPath
+    , optPkgDir   :: !OsPath
     , optPkgFlags :: !FlagMap
     , optGHCCmd   :: !OsPath
     , optHackage  :: !URI
@@ -132,7 +134,7 @@ optionsP noColor =
                  PI.name)
       )
   <*> OA.option path
-      ( OA.long "pkgpath" <>
+      ( OA.long "pkgdir" <>
         OA.short 'p' <>
         OA.help "The path to the pkgsrc package to work with" <>
         OA.action "directory" <>
@@ -315,12 +317,12 @@ parseOptions =
 
 data Context
   = Context
-    { ctxOptions      :: !Options
-    , ctxUseColour    :: !Bool
-    , ctxCanonPkgPath :: !(Deferred CLI OsPath)
-    , ctxProgDb       :: !(Deferred CLI ProgramDb)
-    , ctxIPI          :: !(Deferred CLI InstalledPackageIndex)
-    , ctxSrcDb        :: !(Deferred CLI (SrcDb CLI))
+    { ctxOptions     :: !Options
+    , ctxUseColour   :: !Bool
+    , ctxCanonPkgDir :: !(Deferred CLI OsPath)
+    , ctxProgDb      :: !(Deferred CLI ProgramDb)
+    , ctxIPI         :: !(Deferred CLI InstalledPackageIndex)
+    , ctxSrcDb       :: !(Deferred CLI (SrcDb CLI))
     }
 
 initialCtx :: (MonadThrow m, MonadUnliftIO m) => Options -> m Context
@@ -329,22 +331,22 @@ initialCtx opts
                   Always -> pure True
                   Never  -> pure False
                   Auto   -> liftIO $ hNowSupportsANSI stderr
-       pPath <- defer mkCanonPkgPath
+       pDir  <- defer mkCanonPkgDir
        progs <- defer mkProgDb
        ipi   <- defer readPkgDb
        sdb   <- defer mkSrcDb
        pure Context
-         { ctxOptions      = opts
-         , ctxUseColour    = col
-         , ctxCanonPkgPath = pPath
-         , ctxProgDb       = progs
-         , ctxIPI          = ipi
-         , ctxSrcDb        = sdb
+         { ctxOptions     = opts
+         , ctxUseColour   = col
+         , ctxCanonPkgDir = pDir
+         , ctxProgDb      = progs
+         , ctxIPI         = ipi
+         , ctxSrcDb       = sdb
          }
 
-mkCanonPkgPath :: CLI OsPath
-mkCanonPkgPath =
-  do dir  <- (liftIO . canonicalizePath) . optPkgPath =<< options
+mkCanonPkgDir :: CLI OsPath
+mkCanonPkgDir =
+  do dir  <- (liftIO . canonicalizePath) . optPkgDir =<< options
      -- Does it look like a package directory?
      p    <- liftIO $ doesFileExist (dir </> [osp|../../mk/bsd.pkg.mk|])
      unless p $
@@ -381,7 +383,7 @@ readPkgDb =
 mkSrcDb :: CLI (SrcDb CLI)
 mkSrcDb =
   do make <- optMakeCmd <$> options
-     root <- OP.takeDirectory . OP.takeDirectory <$> canonPkgPath
+     root <- OP.takeDirectory . OP.takeDirectory <$> canonPkgDir
      createSrcDb make root
 
 
@@ -442,18 +444,30 @@ options = CLI $ asks ctxOptions
 command :: CLI Command
 command = optCommand <$> options
 
-origPkgPath :: CLI OsPath
-origPkgPath = optPkgPath <$> options
+origPkgDir :: CLI OsPath
+origPkgDir = optPkgDir <$> options
 
-canonPkgPath :: CLI OsPath
-canonPkgPath = CLI (asks ctxCanonPkgPath) >>= force
+canonPkgDir :: CLI OsPath
+canonPkgDir = CLI (asks ctxCanonPkgDir) >>= force
 
--- |@-d devel/foo@ => @devel@
-category :: CLI Text
-category = toText . OP.takeFileName . OP.takeDirectory =<< canonPkgPath
-  where
-    toText :: MonadThrow m => OsPath -> m Text
-    toText = (T.pack <$>) . OP.decodeUtf
+-- |@-d /.../devel/foo@ => @devel/foo@
+pkgPath :: CLI Text
+pkgPath =
+  do dir  <- canonPkgDir
+     name <- OP.decodeUtf . OP.takeFileName $ dir
+     cat  <- OP.decodeUtf . OP.takeFileName . OP.takeDirectory $ dir
+     pure . T.pack $ cat <> "/" <> name
+
+-- |@-d /.../devel/foo@ => @foo@
+pkgBase :: CLI Text
+pkgBase = pathToText . OP.takeFileName =<< canonPkgDir
+
+-- |@-d /.../devel/foo@ => @devel@
+pkgCategory :: CLI Text
+pkgCategory = pathToText . OP.takeFileName . OP.takeDirectory =<< canonPkgDir
+
+pathToText :: MonadThrow m => OsPath -> m Text
+pathToText = (T.pack <$>) . OP.decodeUtf
 
 maintainer :: CLI (Maybe Text)
 maintainer =
@@ -547,13 +561,13 @@ warn msg =
 fatal :: MonadThrow m => Doc AnsiStyle -> m a
 fatal = throw . CommandError
 
--- |Run @make(1)@ with the working directory set to 'canonPkgPath'. The
+-- |Run @make(1)@ with the working directory set to 'canonPkgDir'. The
 -- child process is spawned with stdin closed, inheriting stderr, and
 -- anything written to its stdout is redirected to stderr.
 runMake :: [Text] -> CLI ()
 runMake args =
   do make <- OP.decodeUtf =<< makeCmd
-     dir  <- OP.decodeUtf =<< canonPkgPath
+     dir  <- OP.decodeUtf =<< canonPkgDir
      let conf = PT.setStdin PT.nullStream
               . PT.setStdout (PT.useHandleOpen stderr)
               . PT.setWorkingDir dir
