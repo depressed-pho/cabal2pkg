@@ -1,6 +1,7 @@
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE DeriveAnyClass #-} -- for deriving Exception
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
@@ -41,7 +42,7 @@ module Cabal2Pkg.CmdLine
   ) where
 
 import Cabal2Pkg.Static (makeQ)
-import Control.Applicative ((<|>), (<**>), many)
+import Control.Applicative ((<|>), (<**>), many, optional)
 import Control.Concurrent.Deferred (Deferred, defer, force)
 import Control.Exception.Safe (Exception(..), MonadMask, catch, throw)
 import Control.Monad (foldM, unless, when)
@@ -119,6 +120,7 @@ optionsP noColor =
         OA.help ("Use colours on output. WHEN can be \"never\", \"always\", or " <>
                  "\"auto\", where \"auto\" enables colours only when the stderr " <>
                  "is a terminal") <>
+        OA.completeWith ["never", "always", "auto"] <>
         OA.value (defaultColourPref noColor) <>
         OA.showDefault <>
         OA.metavar "WHEN"
@@ -133,6 +135,7 @@ optionsP noColor =
       ( OA.long "pkgpath" <>
         OA.short 'p' <>
         OA.help "The path to the pkgsrc package to work with" <>
+        OA.action "directory" <>
         OA.showDefault <>
         OA.value [osp|.|] <>
         OA.metavar "DIR"
@@ -141,7 +144,7 @@ optionsP noColor =
         ( OA.option flagMap
           ( OA.long "flag" <>
             OA.short 'f' <>
-            OA.help "Cabal package flags, such as \"+foo -bar\"" <>
+            OA.help "Cabal package flags to apply, such as \"+foo -bar\"" <>
             OA.metavar "FLAG"
           )
         )
@@ -149,6 +152,7 @@ optionsP noColor =
   <*> OA.option path
       ( OA.long "ghc" <>
         OA.help "The path to the GHC executable" <>
+        OA.action "file" <>
         OA.showDefault <>
         OA.value Paths.ghc <>
         OA.metavar "FILE"
@@ -163,6 +167,7 @@ optionsP noColor =
   <*> OA.option path
       ( OA.long "make" <>
         OA.help "The path to the BSD make(1) command" <>
+        OA.action "file" <>
         OA.showDefault <>
         OA.value $$makeQ <>
         OA.metavar "FILE"
@@ -224,7 +229,7 @@ data InitOptions
 
 data UpdateOptions
   = UpdateOptions
-    {
+    { optPackageURI :: !(Maybe URI)
     }
   deriving (Show)
 
@@ -237,23 +242,41 @@ commandP =
     )
   , OA.command "update"
     ( OA.info updateP
-      -- FIXME: We will most likely need to change this description because
-      -- not all Cabal packages reside in Hackage.
-      (OA.progDesc "Update an existing pkgsrc package to the latest version")
+      (OA.progDesc "Update an existing pkgsrc package to a newer version")
     )
   ]
   where
     initP :: Parser Command
-    initP = (Init .) . InitOptions
-            <$> OA.switch
-                ( OA.long "overwrite" <>
-                  OA.short 'w' <>
-                  OA.help "Overwrite existing files"
-                )
-            <*> OA.argument uriReference (OA.metavar "PACKAGE-URI")
+    initP =
+      (Init .) . InitOptions
+      <$> OA.switch
+          ( OA.long "overwrite" <>
+            OA.short 'w' <>
+            OA.help "Overwrite existing files"
+          )
+      <*> OA.argument uriReference
+          ( OA.help ( "http, https, or file URI to a package tarball." <>
+                      " Or just a package name such as \"base\" if the" <>
+                      " package is from the Hackage repository. In the" <>
+                      " latter case a version number can also be specified" <>
+                      " like \"base-1.2.3\""
+                    ) <>
+            OA.metavar "PACKAGE-URI"
+          )
 
     updateP :: Parser Command
-    updateP = pure $ Update UpdateOptions
+    updateP =
+      Update . UpdateOptions
+      <$> optional
+          ( OA.argument uriReference
+            ( OA.help ( "http, https, or file URI to an updated package" <>
+                        " tarball. Or just a version number like" <>
+                        " \"0.2\" if the package is from the Hackage" <>
+                        " repository. Omit this if you want to update it" <>
+                        " to the latest version" ) <>
+              OA.metavar "PACKAGE-URI"
+            )
+          )
 
 
 -- https://no-color.org/
