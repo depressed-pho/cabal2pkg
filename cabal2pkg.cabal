@@ -48,6 +48,7 @@ executable cabal2pkg
         Cabal2Pkg.Generator.Makefile
         Cabal2Pkg.Generator.Buildlink3
         Cabal2Pkg.Generator.Description
+        Cabal2Pkg.Hackage
         Cabal2Pkg.PackageURI
         Cabal2Pkg.Static
         Control.Concurrent.Deferred
@@ -60,6 +61,7 @@ executable cabal2pkg
     build-depends:
         Cabal                ^>= 3.10.2
       , Cabal-syntax         ^>= 3.10.2
+      , aeson                ^>= 2.2.1
       , ansi-terminal        ^>= 1.1.1
       , base                  == 4.*
       , bytestring           ^>= 0.12.1

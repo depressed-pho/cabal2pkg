@@ -24,11 +24,10 @@ fetchMeta uri =
      cabal <- readCabal uri
      debug $ "Found a package description:\n" <> PP.pretty (ppShow cabal)
 
-     transMeta <- do p <- isFromHackage uri
-                     pure $ if p then
-                              omitHackageDefaults
-                            else
-                              fillInMasterSites uri
+     let transMeta = if isFromHackage uri then
+                       omitHackageDefaults
+                     else
+                       fillInMasterSites uri
      meta <- transMeta <$> summariseCabal cabal
 
      debug $ "Summarised package metadata:\n" <> PP.pretty (ppShow meta)

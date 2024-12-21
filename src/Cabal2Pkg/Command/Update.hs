@@ -8,7 +8,8 @@ module Cabal2Pkg.Command.Update
 import Cabal2Pkg.CmdLine
   ( CLI, UpdateOptions(..), fatal, info, pkgPath, srcDb )
 import Cabal2Pkg.Command.Common (fetchMeta)
-import Cabal2Pkg.PackageURI (PackageURI(Hackage), parsePackageURI)
+import Cabal2Pkg.Hackage (AvailableVersions(AV), fetchHackageVersions)
+import Cabal2Pkg.PackageURI (PackageURI(Hackage), isFromHackage, parsePackageURI)
 import Control.Exception.Safe (MonadThrow)
 import Control.Monad.IO.Unlift (MonadUnliftIO)
 import Database.Pkgsrc.SrcDb qualified as SrcDb
@@ -54,6 +55,10 @@ run (UpdateOptions {..}) =
      pkgURI  <- maybe (pure $ Hackage (pkgName pkgId) Nothing)
                       (parsePackageURI (Just $ pkgName pkgId))
                       optPackageURI
+     if isFromHackage pkgURI
+       then do AV vers <- fetchHackageVersions (pkgName pkgId)
+               error (show vers)
+       else pure ()
      newMeta <- fetchMeta pkgURI
      fail "FIXME: compare versions"
 

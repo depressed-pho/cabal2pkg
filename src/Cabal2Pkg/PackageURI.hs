@@ -9,8 +9,10 @@ module Cabal2Pkg.PackageURI
 
 import Cabal2Pkg.CmdLine (CLI, fatal, hackageURI)
 import Control.Exception.Safe (MonadThrow)
+import Control.Monad (unless)
+import Data.Foldable (toList)
 import Data.List qualified as L
-import Data.Maybe (isJust)
+import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Distribution.Parsec (eitherParsec)
 import Distribution.Pretty (prettyShow)
 import Distribution.Types.PackageId (PackageIdentifier(pkgName, pkgVersion))
@@ -22,6 +24,7 @@ import Prettyprinter (Doc, (<+>))
 import Prettyprinter qualified as PP
 import Prettyprinter.Render.Terminal (AnsiStyle)
 import Prettyprinter.Render.Terminal qualified as PP
+import System.FilePath qualified as FP
 
 
 data PackageURI =
@@ -32,17 +35,44 @@ data PackageURI =
 instance Show PackageURI where
   show = show . renderPackageURI
 
-parsePackageURI :: MonadThrow m
-                => Maybe PackageName -- ^Context, used for the @update@ command
+parsePackageURI :: Maybe PackageName -- ^Context, used for the @update@ command
                 -> URI
-                -> m PackageURI
+                -> CLI PackageURI
 parsePackageURI ctx uri =
   case uriScheme uri of
-    "http:"  -> pure $ HTTP uri
-    "https:" -> pure $ HTTP uri
+    "http:"  -> parseHTTPURI uri
+    "https:" -> parseHTTPURI uri
     "file:"  -> parseFileURI uri
     ""       -> parseHackageURI ctx uri
     _        -> parseUnknown ctx
+
+parseHTTPURI :: URI -> CLI PackageURI
+parseHTTPURI uri = fromMaybe (HTTP uri) . go <$> hackageURI
+  where
+    go :: URI -> Maybe PackageURI
+    go hackage =
+      do unless (hackage `isPrefixOf` uri) $
+           fail "clearly not a hackage URI"
+         -- The first segment after "package" should be
+         -- "{PACKAGE}-{VERSION}". The second one should be
+         -- "{PACKAGE}-{VERSION}.tar.gz".
+         [s1, s2] <- let nDrop = (L.length (pathSegments hackage) + 1)
+                         segs  = pathSegments uri
+                     in
+                       Just $ L.drop nDrop segs
+         pkgId    <- listToMaybe . toList $ eitherParsec s1
+         (name, ".tar.gz")
+                  <- Just $ FP.splitExtensions s2
+         pkgId'   <- listToMaybe . toList $ eitherParsec name
+         unless (pkgId == pkgId') $
+           fail "package ID mismatch"
+         pure $ Hackage (pkgName pkgId) (Just $ pkgVersion pkgId)
+
+    isPrefixOf :: URI -> URI -> Bool
+    isPrefixOf a b =
+      uriScheme    a == uriScheme    b &&
+      uriAuthority a == uriAuthority b &&
+      (pathSegments a <> ["package"]) `L.isPrefixOf` pathSegments b
 
 parseFileURI :: Applicative m => URI -> m PackageURI
 parseFileURI =
@@ -138,15 +168,7 @@ renderPackageURI (Hackage name mVer) =
       , uriFragment  = ""
       }
 
-isFromHackage :: PackageURI -> CLI Bool
-isFromHackage (File    _  ) = pure False
-isFromHackage (Hackage _ _) = pure True
-isFromHackage (HTTP    uri) =
-  do hackage <- hackageURI
-     pure $ hackage `isPrefixOf` uri
-  where
-    isPrefixOf :: URI -> URI -> Bool
-    isPrefixOf a b =
-      uriScheme    a == uriScheme    b &&
-      uriAuthority a == uriAuthority b &&
-      (pathSegments a <> ["package"]) `L.isPrefixOf` pathSegments b
+isFromHackage :: PackageURI -> Bool
+isFromHackage (HTTP    _  ) = False
+isFromHackage (File    _  ) = False
+isFromHackage (Hackage _ _) = True

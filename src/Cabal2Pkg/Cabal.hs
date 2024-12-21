@@ -5,8 +5,9 @@ module Cabal2Pkg.Cabal
   ( readCabal
   ) where
 
+import Cabal2Pkg.Hackage (fetchHackageCabal)
 import Cabal2Pkg.PackageURI (PackageURI(..))
-import Cabal2Pkg.CmdLine (CLI, hackageURI, fatal, warn)
+import Cabal2Pkg.CmdLine (CLI, fatal, warn)
 import Control.Monad.Catch (MonadThrow)
 import Control.Monad.Primitive (PrimMonad)
 import Control.Monad.Trans.Resource (MonadResource)
@@ -21,11 +22,7 @@ import Data.Text qualified as T
 import Data.Text.Encoding (decodeUtf8Lenient)
 import Distribution.PackageDescription.Parsec qualified as DPP
 import Distribution.Parsec.Warning (PWarning, showPWarning)
-import Distribution.Pretty (prettyShow)
 import Distribution.Types.GenericPackageDescription (GenericPackageDescription)
-import Distribution.Types.PackageName (PackageName)
-import Distribution.Types.Version (Version)
-import Lens.Micro ((&), (%~))
 import Network.HTTP.Simple
   ( Response, getResponseBody, getResponseHeader, getResponseStatus
   , httpSource, parseRequest )
@@ -34,12 +31,10 @@ import Network.HTTP.Media qualified as MT
 import Network.HTTP.Types
   ( hContentType, statusCode, statusMessage, statusIsSuccessful )
 import Network.URI (URI(..), uriToString)
-import Network.URI.Lens (uriPathLens)
 import Prelude hiding (pi)
 import Prettyprinter ((<+>))
 import Prettyprinter qualified as PP
 import Prettyprinter.Render.Terminal qualified as PP
-import System.FilePath.Posix qualified as FP
 import System.OsPath.Posix (PosixPath, pstr)
 import System.OsPath.Posix qualified as OPP
 import System.OsString.Posix qualified as OSP
@@ -48,8 +43,7 @@ import System.OsString.Posix qualified as OSP
 readCabal :: PackageURI -> CLI GenericPackageDescription
 readCabal uri =
   do (cabalPath, ws, gpd) <-
-       do hackage <- hackageURI
-          mbCabal <- runConduit $ fetchCabal hackage uri .| C.head
+       do mbCabal <- runConduit $ fetchCabal uri .| C.head
           case mbCabal of
             Nothing ->
               fatal $ "Can't find any .cabal files in" <+> PP.viaShow uri
@@ -78,13 +72,11 @@ readCabal uri =
       do path' <- OPP.decodeUtf path
          warn . PP.pretty $ showPWarning path' w
 
-fetchCabal :: (MonadResource m, MonadThrow m, PrimMonad m)
-           => URI -- ^Hackage URI
-           -> PackageURI
-           -> ConduitT i (PosixPath, ByteString) m ()
-fetchCabal _   (HTTP    uri      ) = fetchHTTP uri
-fetchCabal _   (File    path     ) = fetchLocal path
-fetchCabal hkg (Hackage name mVer) = fetchHackage hkg name mVer
+fetchCabal :: PackageURI
+           -> ConduitT i (PosixPath, ByteString) CLI ()
+fetchCabal (HTTP    uri      ) = fetchHTTP uri
+fetchCabal (File    path     ) = fetchLocal path
+fetchCabal (Hackage name mVer) = fetchHackageCabal name mVer
 
 fetchLocal :: (MonadResource m, MonadThrow m, PrimMonad m)
            => FilePath
@@ -153,68 +145,3 @@ fetchHTTP uri =
       , "application/x-gzip"     -- Non-standard
       , "application/x-tar+gzip" -- Non-standard
       ]
-
--- Hackage recommends API users to use the hackage-security library instead
--- of directly accessing it. However, hackage-security is designed to build
--- a clone of the entire database as a local cache and update it from time
--- to time. That doesn't really suit well to our use case.
-fetchHackage :: (MonadResource m, MonadThrow m)
-             => URI -- ^Hackage URI
-             -> PackageName
-             -> Maybe Version
-             -> ConduitT i (PosixPath, ByteString) m ()
-fetchHackage hackage name mVer =
-  do req   <- parseRequest $ uriToString id cabalURI ""
-     cabal <- toStrict <$> (httpSource req getCabal .| sinkLazy)
-     file  <- OPP.encodeUtf cabalFile
-     yield (file, cabal)
-  where
-    -- We generate
-    -- https://hackage.haskell.org/package/{packageId}/revision/0.cabal but
-    -- not https://hackage.haskell.org/package/{packageId}.cabal, because
-    -- the former is exactly what in downloaded tarballs. The latter is
-    -- potentially a revised one.
-    cabalURI :: URI
-    cabalURI =
-      hackage & uriPathLens %~ \base ->
-      FP.joinPath [ base
-                  , "package"
-                  , prettyShow name <> maybe mempty (("-" <>) . prettyShow) mVer
-                  , "revision"
-                  , "0.cabal"
-                  ]
-
-    cabalFile :: FilePath
-    cabalFile =
-      mconcat [ prettyShow name
-              , maybe mempty (("-" <>) . prettyShow) mVer
-              , ".cabal"
-              ]
-
-    getCabal :: MonadThrow m
-             => Response (ConduitT i ByteString m ())
-             -> ConduitT i ByteString m ()
-    getCabal res =
-      if statusIsSuccessful . getResponseStatus $ res then
-        case getResponseHeader hContentType res of
-          [cType]
-            | isCabal cType ->
-                getResponseBody res
-          ts ->
-            fatal ( "Couldn't fetch a package description from Hackage:" <+>
-                    "Bad media type:" <+>
-                    PP.viaShow ts )
-      else
-        let sc = getResponseStatus res
-        in
-          fatal ( "Couldn't fetch a package description from Hackage:" <+>
-                  PP.pretty (statusCode sc) <+>
-                  PP.pretty (decodeUtf8Lenient . statusMessage $ sc) )
-
-    isCabal :: ByteString -> Bool
-    isCabal cType =
-      case MT.parseAccept cType of
-        Nothing -> False
-        Just mt -> MT.mainType mt == "text"  &&
-                   MT.subType  mt == "plain" &&
-                   elem (mt MT./. "charset") [Nothing, Just "utf-8"]
