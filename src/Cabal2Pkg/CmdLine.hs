@@ -259,10 +259,10 @@ commandP =
           )
       <*> OA.argument uriReference
           ( OA.help ( "http, https, or file URI to a package tarball." <>
-                      " Or just a package name such as \"base\" if the" <>
+                      " Or just a package name such as \"foo\" if the" <>
                       " package is from the Hackage repository. In the" <>
                       " latter case a version number can also be specified" <>
-                      " like \"base-1.2.3\""
+                      " like \"foo-0.1.2\""
                     ) <>
             OA.metavar "PACKAGE-URI"
           )
@@ -274,7 +274,7 @@ commandP =
           ( OA.argument uriReference
             ( OA.help ( "http, https, or file URI to an updated package" <>
                         " tarball. Or just a version number like" <>
-                        " \"0.2\" if the package is from the Hackage" <>
+                        " \"0.1.2\" if the package is from the Hackage" <>
                         " repository. Omit this if you want to update it" <>
                         " to the latest version" ) <>
               OA.metavar "PACKAGE-URI"
@@ -422,23 +422,23 @@ runCLI m =
      ctx  <- initialCtx opts
      runResourceT (runReaderT (unCLI m) ctx)
        `catches`
-       [ Handler $ \(e :: CommandError) ->
-           do useColour <- pure . ctxUseColour $ ctx
-              print' useColour $ msgDoc e
-              exitWith (ExitFailure 1)
-       , Handler $ \(e :: SomeException) ->
-           do useColour <- pure . ctxUseColour $ ctx
-              print' useColour . msgDoc . CommandError $ PP.viaShow e
-              exitWith (ExitFailure 1)
+       [ Handler $ \(e :: CommandError ) -> die ctx $ message e
+       , Handler $ \(e :: SomeException) -> die ctx $ PP.viaShow e
        ]
   where
-    msgDoc :: CommandError -> Doc AnsiStyle
+    die :: Context -> Doc AnsiStyle -> IO a
+    die ctx e =
+      do useColour <- pure . ctxUseColour $ ctx
+         print' useColour $ msgDoc e
+         exitWith (ExitFailure 1)
+
+    msgDoc :: Doc AnsiStyle -> Doc AnsiStyle
     msgDoc e =
       progName <>
       PP.colon <+>
       PP.annotate (baseStyle <> PP.bold) "ERROR" <>
       PP.colon <+>
-      PP.annotate baseStyle (message e) <>
+      PP.annotate baseStyle e <>
       PP.hardline
 
     baseStyle :: AnsiStyle

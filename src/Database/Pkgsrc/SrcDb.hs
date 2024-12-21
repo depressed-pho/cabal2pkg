@@ -35,6 +35,7 @@ import Control.Monad.IO.Unlift (MonadIO, MonadUnliftIO, liftIO)
 import Data.ByteString.Lazy qualified as BL
 import Data.CaseInsensitive (CI)
 import Data.CaseInsensitive qualified as CI
+import Data.Either.Combinators (mapLeft)
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HM
 import Data.HashSet (HashSet)
@@ -58,16 +59,16 @@ import UnliftIO.Async (mapConcurrently)
 
 data SrcDb m
   = SrcDb
-    { categories :: !(HashMap Text (Deferred m (Category m)))
-    , distDir    :: !(Deferred m Text)
+    { dCategories :: !(HashMap Text (Deferred m (Category m)))
+    , dDISTDIR    :: !(Deferred m OsPath)
     }
 
 -- |A category of pkgsrc packages. It has nothing to do with category
 -- theory.
 data Category m
   = Category
-    { packages   :: !(HashMap     Text  (Deferred m (Package m)))
-    , packagesCI :: !(HashMap (CI Text) (Deferred m (Package m)))
+    { cPackages   :: !(HashMap     Text  (Deferred m (Package m)))
+    , cPackagesCI :: !(HashMap (CI Text) (Deferred m (Package m)))
     }
 
 data Package m
@@ -151,7 +152,7 @@ osStr =
   if T.null txt then
     Left "variable empty or undefined"
   else
-    either (Left . show) Right . OP.encodeUtf . T.unpack $ txt
+    mapLeft show . OP.encodeUtf . T.unpack $ txt
 
 uri :: Getter URI
 uri =
@@ -192,17 +193,17 @@ createSrcDb makePath root = SrcDb <$> cats <*> dists
     mkCat catName =
       do pkgs <- scanPkgs makePath root catName
          pure Category
-           { packages   = pkgs
-           , packagesCI = HM.mapKeys CI.mk pkgs
+           { cPackages   = pkgs
+           , cPackagesCI = HM.mapKeys CI.mk pkgs
            }
 
-    dists :: m (Deferred m Text)
+    dists :: m (Deferred m OsPath)
     dists =
       do let dirPath = root </> [osp|pkgtools|] </> [osp|pkg_install|] -- Any package will do.
          vars <- defer $ getMakeVars makePath dirPath
                            [ "DISTDIR"
                            ]
-         pure $ get "DISTDIR" text <$> vars
+         pure $ get "DISTDIR" osStr <$> vars
 {-# ANN createSrcDb ("HLint: ignore Functor law" :: String) #-}
 
 os :: String -> OsString
@@ -332,6 +333,9 @@ filterPkgs catPath = (catMaybes <$>) . mapConcurrently go
                        else pure Nothing
              else pure Nothing
 
+distDir :: MonadUnliftIO m => SrcDb m -> m OsPath
+distDir = force . dDISTDIR
+
 -- |Search for a package by a PKGPATH e.g. @"devel/hs-lens"
 findPackageByPath :: MonadUnliftIO m => SrcDb m -> Text -> m (Maybe (Package m))
 findPackageByPath (SrcDb {..}) path =
@@ -339,11 +343,11 @@ findPackageByPath (SrcDb {..}) path =
     Left _ ->
       pure Nothing
     Right ((cat, name), _) ->
-      case HM.lookup cat categories of
+      case HM.lookup cat dCategories of
         Nothing  -> pure Nothing
         Just dps ->
           do ps <- force dps
-             case HM.lookup name (packages ps) of
+             case HM.lookup name (cPackages ps) of
                Nothing -> pure Nothing
                Just dp -> Just <$> force dp
 
@@ -359,12 +363,12 @@ readPkgPath path =
 -- @PKGNAME@'s.
 findPackageByName :: MonadUnliftIO m => SrcDb m -> Text -> m (Maybe (Package m))
 findPackageByName db name =
-  findPackageCommon db (HM.lookup name . packages)
+  findPackageCommon db (HM.lookup name . cPackages)
 
 -- |A variant of 'findPackage' but performs search case-insensitively.
 findPackageByNameCI :: MonadUnliftIO m => SrcDb m -> Text -> m (Maybe (Package m))
 findPackageByNameCI db name =
-  findPackageCommon db (HM.lookup (CI.mk name) . packagesCI)
+  findPackageCommon db (HM.lookup (CI.mk name) . cPackagesCI)
 
 findPackageCommon :: forall m.
                      MonadUnliftIO m
@@ -372,7 +376,7 @@ findPackageCommon :: forall m.
                   -> (Category m -> Maybe (Deferred m (Package m)))
                   -> m (Maybe (Package m))
 findPackageCommon (SrcDb {..}) q
-  = asum <$> mapConcurrently (go <=< force) (HM.elems categories)
+  = asum <$> mapConcurrently (go <=< force) (HM.elems dCategories)
   where
     go :: Category m -> m (Maybe (Package m))
     go = traverse force . q

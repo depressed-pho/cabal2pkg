@@ -14,6 +14,7 @@ import Cabal2Pkg.Extractor
 import Cabal2Pkg.Generator.Buildlink3 (genBuildlink3)
 import Cabal2Pkg.Generator.Description (genDESCR)
 import Cabal2Pkg.Generator.Makefile (genMakefile)
+import Cabal2Pkg.PackageURI (parsePackageURI)
 import Control.Exception.Safe (catch, throw)
 import Control.Monad (when)
 import Control.Monad.IO.Unlift (liftIO)
@@ -37,7 +38,7 @@ import System.OsPath qualified as OP
 
 run :: HasCallStack => InitOptions -> CLI ()
 run (InitOptions {..}) =
-  do meta <- fetchMeta optPackageURI
+  do meta <- fetchMeta =<< parsePackageURI Nothing optPackageURI
 
      canonDir <- canonPkgDir
      validatePkgPath meta

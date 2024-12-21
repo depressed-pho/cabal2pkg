@@ -14,6 +14,7 @@ import Cabal2Pkg.CmdLine qualified as CLI
 import Cabal2Pkg.Extractor.Component
   ( ComponentMeta(..), ComponentType(..), cType, extractComponents )
 import Cabal2Pkg.Extractor.License (extractLicense)
+import Cabal2Pkg.PackageURI (PackageURI(HTTP))
 import Data.Data (Data)
 import Data.Maybe (fromMaybe)
 import Data.Set (Set)
@@ -29,7 +30,7 @@ import Distribution.Types.Version (Version)
 import Distribution.Utils.ShortText qualified as ST
 import GHC.Stack (HasCallStack)
 import Lens.Micro ((^.))
-import Network.URI (URI(uriScheme, uriPath), uriIsAbsolute, uriToString)
+import Network.URI (URI(uriPath), uriToString)
 import System.FilePath.Posix qualified as FP
 
 
@@ -106,20 +107,16 @@ omitHackageDefaults pm =
      , homepage    = Nothing
      }
 
-fillInMasterSites :: HasCallStack => URI -> PackageMeta -> PackageMeta
-fillInMasterSites uri pm
-  | uriIsAbsolute uri =
-      case uriScheme uri of
-        "file" -> invalid
-        _      -> let path' = FP.dropFileName . uriPath $ uri
-                      uri'  = uri { uriPath = path' }
-                  in
-                    pm { masterSites = pure . T.pack $ uriToString id uri' "" }
-  | otherwise =
-      invalid
-  where
-    invalid :: HasCallStack => a
-    invalid = error ("Cannot fill in MASTER_SITES for URI: " <> show uri)
+fillInMasterSites :: HasCallStack => PackageURI -> PackageMeta -> PackageMeta
+fillInMasterSites uri pm =
+  case uri of
+    HTTP httpURI ->
+      let path' = FP.dropFileName . uriPath $ httpURI
+          uri'  = httpURI { uriPath = path' }
+      in
+        pm { masterSites = pure . T.pack $ uriToString id uri' "" }
+    _ ->
+      error ("Cannot fill in MASTER_SITES for URI: " <> show uri)
 
 hasLibraries :: PackageMeta -> Bool
 hasLibraries

@@ -48,6 +48,7 @@ executable cabal2pkg
         Cabal2Pkg.Generator.Makefile
         Cabal2Pkg.Generator.Buildlink3
         Cabal2Pkg.Generator.Description
+        Cabal2Pkg.PackageURI
         Cabal2Pkg.Static
         Control.Concurrent.Deferred
         Database.Pkgsrc.SrcDb
@@ -67,6 +68,7 @@ executable cabal2pkg
       , conduit-extra        ^>= 1.3.6
       , containers           ^>= 0.6.8
       , directory            ^>= 1.3.8
+      , either               ^>= 5.0.2
       , exceptions           ^>= 0.10.7
       , filepath              >= 1.4
       , ghc-paths            ^>= 0.1

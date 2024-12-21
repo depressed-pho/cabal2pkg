@@ -1,11 +1,11 @@
-{-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE ViewPatterns #-}
 module Cabal2Pkg.Cabal
-  ( isFromHackage
-  , readCabal
+  ( readCabal
   ) where
 
+import Cabal2Pkg.PackageURI (PackageURI(..))
 import Cabal2Pkg.CmdLine (CLI, hackageURI, fatal, warn)
 import Control.Monad.Catch (MonadThrow)
 import Control.Monad.Primitive (PrimMonad)
@@ -17,15 +17,14 @@ import Data.Conduit.Combinators (sinkLazy, sourceFile)
 import Data.Conduit.Combinators qualified as C
 import Data.Conduit.Tar (FileInfo(filePath), untar)
 import Data.Conduit.Zlib (ungzip)
-import Data.List qualified as L
 import Data.Text qualified as T
 import Data.Text.Encoding (decodeUtf8Lenient)
 import Distribution.PackageDescription.Parsec qualified as DPP
-import Distribution.Parsec (eitherParsec)
 import Distribution.Parsec.Warning (PWarning, showPWarning)
 import Distribution.Pretty (prettyShow)
 import Distribution.Types.GenericPackageDescription (GenericPackageDescription)
-import Distribution.Types.PackageId (PackageId)
+import Distribution.Types.PackageName (PackageName)
+import Distribution.Types.Version (Version)
 import Lens.Micro ((&), (%~))
 import Network.HTTP.Simple
   ( Response, getResponseBody, getResponseHeader, getResponseStatus
@@ -34,13 +33,11 @@ import Network.HTTP.Media (MediaType)
 import Network.HTTP.Media qualified as MT
 import Network.HTTP.Types
   ( hContentType, statusCode, statusMessage, statusIsSuccessful )
-import Network.URI (URI(..), pathSegments, uriToString)
+import Network.URI (URI(..), uriToString)
 import Network.URI.Lens (uriPathLens)
-import PackageInfo_cabal2pkg qualified as PI
 import Prelude hiding (pi)
-import Prettyprinter (Doc, (<+>))
+import Prettyprinter ((<+>))
 import Prettyprinter qualified as PP
-import Prettyprinter.Render.Terminal (AnsiStyle)
 import Prettyprinter.Render.Terminal qualified as PP
 import System.FilePath.Posix qualified as FP
 import System.OsPath.Posix (PosixPath, pstr)
@@ -48,8 +45,7 @@ import System.OsPath.Posix qualified as OPP
 import System.OsString.Posix qualified as OSP
 
 
-readCabal :: URI -- ^URI of a package tarball
-          -> CLI GenericPackageDescription
+readCabal :: PackageURI -> CLI GenericPackageDescription
 readCabal uri =
   do (cabalPath, ws, gpd) <-
        do hackage <- hackageURI
@@ -82,40 +78,18 @@ readCabal uri =
       do path' <- OPP.decodeUtf path
          warn . PP.pretty $ showPWarning path' w
 
-isFromHackage :: URI -> CLI Bool
-isFromHackage uri =
-  case uriScheme uri of
-    "" -> pure True
-    _  -> do hackage <- hackageURI
-             pure $ hackage `isPrefixOf` uri
-  where
-    isPrefixOf :: URI -> URI -> Bool
-    isPrefixOf a b =
-      uriScheme    a == uriScheme    b &&
-      uriAuthority a == uriAuthority b &&
-      (pathSegments a <> ["package"]) `L.isPrefixOf` pathSegments b
-
 fetchCabal :: (MonadResource m, MonadThrow m, PrimMonad m)
            => URI -- ^Hackage URI
-           -> URI -- ^User-specified URI
+           -> PackageURI
            -> ConduitT i (PosixPath, ByteString) m ()
-fetchCabal hackage uri =
-  -- NOTE: This is technically wrong. RFC 3986 says URI schemes are case
-  -- insensitive. But everyone wrongly treats them as case sensitive so...
-  case uriScheme uri of
-    "http:"  -> fetchHTTP uri
-    "https:" -> fetchHTTP uri
-    "file:"  -> fetchLocal uri
-    ""       -> fetchHackage hackage uri
-    _        -> fetchUnknown
+fetchCabal _   (HTTP    uri      ) = fetchHTTP uri
+fetchCabal _   (File    path     ) = fetchLocal path
+fetchCabal hkg (Hackage name mVer) = fetchHackage hkg name mVer
 
 fetchLocal :: (MonadResource m, MonadThrow m, PrimMonad m)
-           => URI
+           => FilePath
            -> ConduitT i (PosixPath, ByteString) m ()
-fetchLocal (uriPath -> path) =
-  -- NOTE: According to RFC 8089, technically we should verify that the
-  -- authority part of the file:// URI is either empty, "localhost", or the
-  -- FQDN of the local host. But is that worth it?
+fetchLocal path =
   sourceFile path .| extractCabalFromTarball
 
 extractCabalFromTarball :: (MonadResource m, MonadThrow m, PrimMonad m)
@@ -186,32 +160,36 @@ fetchHTTP uri =
 -- to time. That doesn't really suit well to our use case.
 fetchHackage :: (MonadResource m, MonadThrow m)
              => URI -- ^Hackage URI
-             -> URI -- ^User-specified URI
+             -> PackageName
+             -> Maybe Version
              -> ConduitT i (PosixPath, ByteString) m ()
-fetchHackage hackage (uriPath -> packageId) =
-  case eitherParsec packageId of
-    Left _   -> fetchUnknown
-    Right pi ->
-      do let uri = cabalURI pi
-         req   <- parseRequest $ uriToString id uri ""
-         cabal <- toStrict <$> (httpSource req getCabal .| sinkLazy)
-         file  <- OPP.encodeUtf $ prettyShow pi <> ".cabal"
-         yield (file, cabal)
+fetchHackage hackage name mVer =
+  do req   <- parseRequest $ uriToString id cabalURI ""
+     cabal <- toStrict <$> (httpSource req getCabal .| sinkLazy)
+     file  <- OPP.encodeUtf cabalFile
+     yield (file, cabal)
   where
     -- We generate
     -- https://hackage.haskell.org/package/{packageId}/revision/0.cabal but
     -- not https://hackage.haskell.org/package/{packageId}.cabal, because
     -- the former is exactly what in downloaded tarballs. The latter is
     -- potentially a revised one.
-    cabalURI :: PackageId -> URI
-    cabalURI pi =
+    cabalURI :: URI
+    cabalURI =
       hackage & uriPathLens %~ \base ->
       FP.joinPath [ base
                   , "package"
-                  , prettyShow pi
+                  , prettyShow name <> maybe mempty (("-" <>) . prettyShow) mVer
                   , "revision"
                   , "0.cabal"
                   ]
+
+    cabalFile :: FilePath
+    cabalFile =
+      mconcat [ prettyShow name
+              , maybe mempty (("-" <>) . prettyShow) mVer
+              , ".cabal"
+              ]
 
     getCabal :: MonadThrow m
              => Response (ConduitT i ByteString m ())
@@ -240,45 +218,3 @@ fetchHackage hackage (uriPath -> packageId) =
         Just mt -> MT.mainType mt == "text"  &&
                    MT.subType  mt == "plain" &&
                    elem (mt MT./. "charset") [Nothing, Just "utf-8"]
-
-fetchUnknown :: MonadThrow m => m a
-fetchUnknown =
-  fatal $ PP.vsep
-  [ PP.hsep [ PP.pretty PI.name
-            , "doesn't know how to handle this URI. These are all it supports:"
-            ]
-  , PP.hsep [ PP.pretty '-'
-            , PP.annotate styScheme "http://"
-            , "or"
-            , PP.annotate styScheme "https://"
-            , "URL of a package tarball"
-            ]
-  , PP.hsep [ PP.pretty '-'
-            , PP.annotate styScheme "file://"
-            , "URL of a package tarball on the local filesystem"
-            ]
-    -- NOTE: It would be nice to render the word "Hackage" as a hyperlink
-    -- to https://hackage.haskell.org/, but sadly
-    -- prettyprinter-ansi-terminal doesn't support hyperlinks at the
-    -- moment.
-  , PP.hsep [ "- a schema-less name of a package to be retrieved from Hackage,"
-            , "in the form of"
-            , PP.annotate styForm "NAME"
-            , eg "cabal-install"
-            , "or"
-            , PP.annotate styForm "NAME-VERSION"
-            , eg "cabal-install-3.10.3.0"
-            ]
-  ]
-  where
-    styScheme :: AnsiStyle
-    styScheme = PP.colorDull PP.Green
-
-    styForm :: AnsiStyle
-    styForm = PP.colorDull PP.Cyan
-
-    styExample :: AnsiStyle
-    styExample = PP.colorDull PP.Yellow
-
-    eg :: Doc AnsiStyle -> Doc AnsiStyle
-    eg = PP.parens . ("e.g." <+>) . PP.annotate styExample
