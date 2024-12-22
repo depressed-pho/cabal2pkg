@@ -163,7 +163,7 @@ renderPackageURI (File path) =
 renderPackageURI (Hackage name mVer) =
   URI { uriScheme    = ""
       , uriAuthority = Nothing
-      , uriPath      = prettyShow name <> maybe mempty (("-" <>) . prettyShow) mVer
+      , uriPath      = prettyShow name <> foldMap (("-" <>) . prettyShow) mVer
       , uriQuery     = ""
       , uriFragment  = ""
       }

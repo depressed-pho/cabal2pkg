@@ -50,13 +50,16 @@ executable cabal2pkg
         Cabal2Pkg.Generator.Description
         Cabal2Pkg.Hackage
         Cabal2Pkg.PackageURI
+        Cabal2Pkg.Pretty
         Cabal2Pkg.Static
         Control.Concurrent.Deferred
         Database.Pkgsrc.SrcDb
-        GHC.Paths.OsPath
+        GHC.Paths.PosixPath
         Language.BMake.AST
         PackageInfo_cabal2pkg
-        System.File.OsPath.Alt
+        System.File.PosixPath.Alt
+        System.Directory.PosixPath
+        System.OsString.Posix.Instances
 
     build-depends:
         Cabal                ^>= 3.10.2

@@ -32,6 +32,7 @@ import GHC.Stack (HasCallStack)
 import Lens.Micro ((^.))
 import Network.URI (URI(uriPath), uriToString)
 import System.FilePath.Posix qualified as FP
+import System.OsPath.Posix qualified as OP
 
 
 data PackageMeta = PackageMeta
@@ -59,9 +60,9 @@ data PackageMeta = PackageMeta
 -- is, it doesn't read its @Makefile@ even if it exists.
 summariseCabal :: GenericPackageDescription -> CLI PackageMeta
 summariseCabal gpd
-  = do path     <- CLI.pkgPath
-       base     <- CLI.pkgBase
-       cat      <- CLI.pkgCategory
+  = do path     <- (T.pack <$>) . OP.decodeUtf =<< CLI.pkgPath
+       base     <- (T.pack <$>) . OP.decodeUtf =<< CLI.pkgBase
+       cat      <- (T.pack <$>) . OP.decodeUtf =<< CLI.pkgCategory
        mtr      <- CLI.maintainer
        fs       <- CLI.pkgFlags
        (cs, ts) <- extractComponents gpd

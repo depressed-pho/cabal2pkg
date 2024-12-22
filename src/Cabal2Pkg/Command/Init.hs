@@ -8,33 +8,29 @@ module Cabal2Pkg.Command.Init
 import Cabal2Pkg.CmdLine
   ( CLI, InitOptions(..), debug, fatal, info, canonPkgDir, origPkgDir
   , makeCmd, pkgBase, runMake )
-import Cabal2Pkg.Command.Common (fetchMeta)
+import Cabal2Pkg.Command.Common (command, option, fetchMeta)
 import Cabal2Pkg.Extractor
   ( PackageMeta(distBase), hasLibraries, hasExecutables, hasForeignLibs )
 import Cabal2Pkg.Generator.Buildlink3 (genBuildlink3)
 import Cabal2Pkg.Generator.Description (genDESCR)
 import Cabal2Pkg.Generator.Makefile (genMakefile)
 import Cabal2Pkg.PackageURI (parsePackageURI)
+import Cabal2Pkg.Pretty (prettyAnsi)
 import Control.Exception.Safe (catch, throw)
 import Control.Monad (when)
-import Control.Monad.IO.Unlift (liftIO)
 import Data.ByteString.Lazy qualified as LBS
 import Data.CaseInsensitive qualified as CI
-import Data.Text (Text)
+import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
 import Data.Text.Lazy.Encoding qualified as TL
 import GHC.Stack (HasCallStack)
-import PackageInfo_cabal2pkg qualified as PI
 import Prelude hiding (exp, writeFile)
-import Prettyprinter ((<+>), Doc)
 import Prettyprinter qualified as PP
-import Prettyprinter.Render.Terminal (AnsiStyle)
-import Prettyprinter.Render.Terminal qualified as PP
-import System.Directory.OsPath (createDirectoryIfMissing)
-import System.File.OsPath.Alt (writeFile, writeFreshFile)
+import System.Directory.PosixPath (createDirectoryIfMissing)
+import System.File.PosixPath.Alt (writeFile, writeFreshFile)
 import System.IO.Error (isAlreadyExistsError)
-import System.OsPath ((</>), OsPath, osp)
-import System.OsPath qualified as OP
+import System.OsPath.Posix ((</>), PosixPath, pstr)
+import System.OsPath.Posix qualified as OP
 
 run :: HasCallStack => InitOptions -> CLI ()
 run (InitOptions {..}) =
@@ -42,56 +38,52 @@ run (InitOptions {..}) =
 
      canonDir <- canonPkgDir
      validatePkgPath meta
-     liftIO $ createDirectoryIfMissing True canonDir
+     createDirectoryIfMissing True canonDir
 
      -- These files are generated from the package description. We don't
      -- overwrite existing files unless -w is given.
      let descr = genDESCR meta
      debug $ "Generated DESCR:\n" <> PP.pretty (TL.strip descr)
-     writeFile' [osp|DESCR|] (TL.encodeUtf8 descr)
+     writeFile' [pstr|DESCR|] (TL.encodeUtf8 descr)
 
      let mk = genMakefile meta
      debug $ "Generated Makefile:\n" <> PP.pretty (TL.strip mk)
-     writeFile' [osp|Makefile|] (TL.encodeUtf8 mk)
+     writeFile' [pstr|Makefile|] (TL.encodeUtf8 mk)
 
      when (shouldHaveBuildlink3 meta /= Just False) $
        do let bl3 = genBuildlink3 meta
           debug $ "Generated buildlink3.mk:\n" <> PP.pretty (TL.strip bl3)
-          writeFile' [osp|buildlink3.mk|] (TL.encodeUtf8 bl3)
+          writeFile' [pstr|buildlink3.mk|] (TL.encodeUtf8 bl3)
 
      -- PLIST cannot be directly generated from the package
      -- description. If it already exists we leave them unchanged.
      plist <- initialPLIST
-     createFile' [osp|PLIST|] (TL.encodeUtf8 plist)
+     createFile' [pstr|PLIST|] (TL.encodeUtf8 plist)
 
      -- Generate distinfo, but the only way to do it is to run make(1).
      info "Generating distinfo..."
      runMake ["distinfo"]
   where
-    command :: Doc ann
-    command = PP.pretty PI.name <+> "init"
-
-    writeFile' :: OsPath -> LBS.ByteString -> CLI ()
+    writeFile' :: PosixPath -> LBS.ByteString -> CLI ()
     writeFile' name bs =
       do let f | optOverwrite = writeFile
                | otherwise    = writeFreshFile
-         cfp  <- (</> name) <$> canonPkgDir
-         ofp  <- (</> name) <$> origPkgDir
-         ofp' <- PP.pretty <$> OP.decodeUtf ofp
+         cfp <- (</> name) <$> canonPkgDir
+         ofp <- (</> name) <$> origPkgDir
          f cfp bs `catch` \(e :: IOError) ->
            if isAlreadyExistsError e then
-             fatal ( "The file" <+>
-                     PP.dquotes (PP.annotate (PP.color PP.Cyan) ofp') <+>
-                     "already exists. If you want to overwrite it," <+>
-                     "re-run" <+>
-                     PP.dquotes (PP.annotate (PP.color PP.Cyan) command) <+>
-                     "with -w"
-                   )
+             fatal $ PP.hsep [ "The file"
+                             , prettyAnsi ofp
+                             , "already exists. If you want to overwrite it, re-run"
+                             , command "init"
+                             , "with"
+                             , option "-w"
+                             ]
            else
              throw e
-         info $ "Wrote " <> ofp'
+         info $ "Wrote " <> prettyAnsi ofp
 
-    createFile' :: OsPath -> LBS.ByteString -> CLI ()
+    createFile' :: PosixPath -> LBS.ByteString -> CLI ()
     createFile' name bs =
       do cfp  <- (</> name) <$> canonPkgDir
          ofp  <- (</> name) <$> origPkgDir
@@ -116,30 +108,38 @@ initialPLIST =
 
 validatePkgPath :: PackageMeta -> CLI ()
 validatePkgPath meta
-  = do actual <- pkgBase
-       let expWoPfx      = CI.foldCase . distBase $ meta
-           expWPfx       = "hs-" <> expWoPfx
-           expAndAct     :: Text -> Doc AnsiStyle
-           expAndAct exp = "The package should be named" <+> pprName exp <+>
-                           "but not" <+> pprName actual
-           expAndAct'    = "The package should be named either" <+> pprName expWPfx <+>
-                           "or" <+> pprName expWoPfx <+> "(depending on whether" <+>
-                           "the fact it's implemented in Haskell is significant" <+>
-                           "to users or the rest of the pkgsrc tree)" <+>
-                           "but not" <+> pprName actual
-           pfxNeeded     = "The prefix" <+> pprName "hs-" <+>
-                           "indicates this is a Haskell library" <+>
-                           "that can only be used in the Haskell world."
-           pfxUnneeded   = "The prefix" <+> pprName "hs-" <+>
-                           "indicates a Haskell library that can only be used in the" <+>
-                           "Haskell world. However, this package only installs" <+>
-                           "executables (or foreign libraries)" <+>
-                           "that happen to be implemented in Haskell, which is of no" <+>
-                           "significance to its users or the rest of the pkgsrc tree."
+  = do actual   <- pkgBase
+       expWoPfx <- OP.encodeUtf . T.unpack . CI.foldCase . distBase $ meta
+       let expWPfx       = [pstr|hs-|] <> expWoPfx
+           expAndAct exp = PP.hsep [ "The package should be named"
+                                   , prettyAnsi exp
+                                   , "but not"
+                                   , prettyAnsi actual
+                                   ]
+           expAndAct'    = PP.hsep [ "The package should be named either"
+                                   , prettyAnsi expWPfx
+                                   , "or"
+                                   , prettyAnsi expWoPfx
+                                   , "(depending on whether the fact it's"
+                                   , "implemented in Haskell is significant"
+                                   , "to users or the rest of the pkgsrc tree)"
+                                   , "but not"
+                                   , prettyAnsi actual
+                                   ]
+           pfxNeeded     = PP.hsep [ "The prefix"
+                                   , prettyAnsi [pstr|hs-|]
+                                   , "indicates this is a Haskell library that"
+                                   , "can only be used in the Haskell world."
+                                   ]
+           pfxUnneeded   = PP.hsep [ "The prefix"
+                                   , prettyAnsi [pstr|hs-|]
+                                   , "indicates a Haskell library that can only be used in the"
+                                   , "Haskell world. However, this package only installs"
+                                   , "executables (or foreign libraries) that happen to be"
+                                   , "implemented in Haskell, which is of no significance"
+                                   , "to its users or the rest of the pkgsrc tree."
+                                   ]
            renameDir     = "Please rename the directory and retry the command."
-           pprName       :: Text -> Doc AnsiStyle
-           pprName name  = PP.dquotes $
-                           PP.annotate (PP.color PP.Cyan) (PP.pretty name)
 
        case shouldHaveHsPrefix meta of
          Just True ->
@@ -151,24 +151,33 @@ validatePkgPath meta
 
              else if actual == expWoPfx then
                -- Almost correct but without hs-
-               fatal ( expAndAct expected <+> "to avoid name clashing." <+>
-                       pfxNeeded <+> renameDir )
+               fatal $ PP.hsep [ expAndAct expected
+                               , "to avoid name clashing."
+                               , pfxNeeded
+                               , renameDir
+                               ]
 
              else if CI.mk actual == CI.mk expected then
                -- Almost correct but wrongly cased
-               fatal ( expAndAct expected <> ". We have a norm that" <+>
-                       "new packages should have entirely lower-case names." <+>
-                       renameDir )
+               fatal $ PP.hsep [ expAndAct expected <> ". We have a norm that"
+                               , "new packages should have entirely lower-case names."
+                               , renameDir
+                               ]
 
              else if CI.mk actual == CI.mk expWoPfx then
                -- No prefix, wrongly cased
-               fatal ( expAndAct expected <> "." <+> pfxNeeded <+>
-                       "We also have a norm that new packages should have" <+>
-                       "entirely lower-case names." <+> renameDir )
+               fatal $ PP.hsep [ expAndAct expected <> "."
+                               , pfxNeeded
+                               , "We also have a norm that new packages should have"
+                               , "entirely lower-case names."
+                               , renameDir
+                               ]
+
              else
                -- Totally incorrect
-               fatal (expAndAct expected <> "." <+> renameDir)
-
+               fatal $ PP.hsep [ expAndAct expected <> "."
+                               , renameDir
+                               ]
          Just False ->
            let expected = expWoPfx
            in
@@ -178,24 +187,32 @@ validatePkgPath meta
 
              else if actual == expWPfx then
                -- Almost correct but superfluous hs-
-               fatal ( expAndAct expected <> "." <+> pfxUnneeded <+>
-                       renameDir )
+               fatal $ PP.hsep [ expAndAct expected <> "."
+                               , pfxUnneeded
+                               , renameDir
+                               ]
 
              else if CI.mk actual == CI.mk expected then
                -- Almost correct but wrongly cased
-               fatal ( expAndAct expected <> ". We have a norm that" <+>
-                       "new packages should have entirely lower-case names." <+>
-                       renameDir )
+               fatal $ PP.hsep [ expAndAct expected <> ". We have a norm that"
+                               , "new packages should have entirely lower-case names."
+                               , renameDir
+                               ]
 
              else if CI.mk actual == CI.mk expWoPfx then
                -- Superfluous prefix, wrongly cased
-               fatal (expAndAct expected <> "." <+> pfxUnneeded <+>
-                      "We also have a norm that new packages should have" <+>
-                      "entirely lower-case names." <+> renameDir)
+               fatal $ PP.hsep [ expAndAct expected <> "."
+                               , pfxUnneeded
+                               , "We also have a norm that new packages should have"
+                               , "entirely lower-case names."
+                               , renameDir
+                               ]
 
              else
                -- Totally incorrect
-               fatal (expAndAct expected <> "." <+> renameDir)
+               fatal $ PP.hsep [ expAndAct expected <> "."
+                               , renameDir
+                               ]
 
          Nothing ->
            if actual == expWPfx || actual == expWoPfx then
@@ -204,13 +221,16 @@ validatePkgPath meta
 
            else if CI.mk actual == CI.mk expWPfx || CI.mk actual == CI.mk expWoPfx then
              -- Almost correct but wrongly cased
-             fatal (expAndAct' <> ". We have a norm that" <+>
-                    "new packages should have entirely lower-case names." <+>
-                    renameDir)
+             fatal $ PP.hsep [ expAndAct' <> ". We have a norm that"
+                             , "new packages should have entirely lower-case names."
+                             , renameDir
+                             ]
 
            else
              -- Totally incorrect
-             fatal (expAndAct' <> "." <+> renameDir)
+             fatal $ PP.hsep [ expAndAct' <> "."
+                             , renameDir
+                             ]
 
 --
 -- If the package only provides Haskell libraries but no executables or

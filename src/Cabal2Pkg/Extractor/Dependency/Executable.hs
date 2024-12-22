@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE QuasiQuotes #-}
 module Cabal2Pkg.Extractor.Dependency.Executable
   ( ExeDep(..)
   , extractExeDep
@@ -18,6 +19,8 @@ import Distribution.Types.ExeDependency qualified as C
 import Distribution.Types.PackageName qualified as C
 import Distribution.Types.Version (Version)
 import Distribution.Types.VersionRange qualified as C
+import System.OsPath.Posix (pstr)
+import System.OsPath.Posix qualified as OP
 
 
 -- |Dependency on a tool provided by a pkgsrc package.
@@ -89,20 +92,18 @@ findPkgsrcPkg name
        -- concurrently? I'd say no, because most of the time packages
        -- without the prefix "hs-" is what we would find, and the other
        -- search would just be a waste of CPU cycles.
-       p0 <- SrcDb.findPackageByNameCI db name'
+       name' <- OP.encodeUtf . C.unPackageName $ name
+       p0    <- SrcDb.findPackageByNameCI db name'
        case p0 of
          Just p  -> found p
          Nothing ->
-           do p1 <- SrcDb.findPackageByNameCI db ("hs-" <> name')
+           do p1 <- SrcDb.findPackageByNameCI db ([pstr|hs-|] <> name')
               join <$> traverse found p1
   where
-    name' :: Text
-    name' = T.pack . C.unPackageName $ name
-
     found :: Package CLI -> CLI (Maybe (Text, Version))
     found pkg
       = do ver <- toCabalVer =<< SrcDb.pkgVersionNoRev pkg
-           pure $ Just (name', ver)
+           pure $ Just (T.pack . C.unPackageName $ name, ver)
 
     toCabalVer :: MonadFail m => Text -> m Version
     toCabalVer = either fail pure . eitherParsec . T.unpack

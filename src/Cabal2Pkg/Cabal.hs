@@ -5,8 +5,9 @@ module Cabal2Pkg.Cabal
   ( readCabal
   ) where
 
-import Cabal2Pkg.Hackage (fetchHackageCabal)
+import Cabal2Pkg.Hackage qualified as Hackage
 import Cabal2Pkg.PackageURI (PackageURI(..))
+import Cabal2Pkg.Pretty (prettyAnsi)
 import Cabal2Pkg.CmdLine (CLI, fatal, warn)
 import Control.Monad.Catch (MonadThrow)
 import Control.Monad.Primitive (PrimMonad)
@@ -18,7 +19,6 @@ import Data.Conduit.Combinators (sinkLazy, sourceFile)
 import Data.Conduit.Combinators qualified as C
 import Data.Conduit.Tar (FileInfo(filePath), untar)
 import Data.Conduit.Zlib (ungzip)
-import Data.Text qualified as T
 import Data.Text.Encoding (decodeUtf8Lenient)
 import Distribution.PackageDescription.Parsec qualified as DPP
 import Distribution.Parsec.Warning (PWarning, showPWarning)
@@ -34,10 +34,9 @@ import Network.URI (URI(..), uriToString)
 import Prelude hiding (pi)
 import Prettyprinter ((<+>))
 import Prettyprinter qualified as PP
-import Prettyprinter.Render.Terminal qualified as PP
 import System.OsPath.Posix (PosixPath, pstr)
-import System.OsPath.Posix qualified as OPP
-import System.OsString.Posix qualified as OSP
+import System.OsPath.Posix qualified as OP
+import System.OsString.Posix qualified as OS
 
 
 readCabal :: PackageURI -> CLI GenericPackageDescription
@@ -59,24 +58,23 @@ readCabal uri =
     parseCabal cabalPath cabal =
       case DPP.runParseResult $ DPP.parseGenericPackageDescription cabal of
         (_, Left e) ->
-          do path' <- T.pack <$> OPP.decodeUtf cabalPath
-             fatal ( "Cannot parse" <+>
-                     PP.dquotes (PP.annotate (PP.color PP.Cyan) (PP.pretty path')) <>
-                     PP.colon <+>
-                     PP.viaShow e )
+          fatal ( "Cannot parse" <+>
+                  prettyAnsi cabalPath <>
+                  PP.colon <+>
+                  PP.viaShow e )
         (ws, Right gpd) ->
           pure (cabalPath, ws, gpd)
 
     warn' :: PosixPath -> PWarning -> CLI ()
     warn' path w =
-      do path' <- OPP.decodeUtf path
+      do path' <- OP.decodeUtf path
          warn . PP.pretty $ showPWarning path' w
 
 fetchCabal :: PackageURI
            -> ConduitT i (PosixPath, ByteString) CLI ()
 fetchCabal (HTTP    uri      ) = fetchHTTP uri
 fetchCabal (File    path     ) = fetchLocal path
-fetchCabal (Hackage name mVer) = fetchHackageCabal name mVer
+fetchCabal (Hackage name mVer) = Hackage.fetchCabal name mVer
 
 fetchLocal :: (MonadResource m, MonadThrow m, PrimMonad m)
            => FilePath
@@ -92,10 +90,10 @@ extractCabalFromTarball = ungzip .| untar findCabal
               => FileInfo
               -> ConduitT ByteString (PosixPath, ByteString) m ()
     findCabal fi =
-      do path <- OSP.fromBytes . filePath $ fi
-         case OPP.splitPath path of
+      do path <- OS.fromBytes . filePath $ fi
+         case OP.splitPath path of
            [_root, file]
-             | [pstr|.cabal|] `OPP.isExtensionOf` file ->
+             | [pstr|.cabal|] `OP.isExtensionOf` file ->
                  do cabal <- toStrict <$> sinkLazy
                     yield (path, cabal)
            _ ->
@@ -119,7 +117,7 @@ fetchHTTP uri =
                 getResponseBody res
           ts ->
             fatal ( "Couldn't fetch a package tarball from" <+>
-                    PP.dquotes (PP.annotate (PP.color PP.Cyan) (PP.viaShow uri)) <>
+                    prettyAnsi uri <>
                     PP.colon <+>
                     "Bad media type:" <+>
                     PP.viaShow ts )
@@ -127,7 +125,7 @@ fetchHTTP uri =
         let sc = getResponseStatus res
         in
           fatal ( "Couldn't fetch a package tarball from" <+>
-                  PP.dquotes (PP.annotate (PP.color PP.Cyan) (PP.viaShow uri)) <>
+                  prettyAnsi uri <>
                   PP.colon <+>
                   PP.pretty (statusCode sc) <+>
                   PP.pretty (decodeUtf8Lenient . statusMessage $ sc) )

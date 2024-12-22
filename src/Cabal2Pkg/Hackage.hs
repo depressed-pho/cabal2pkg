@@ -6,14 +6,20 @@
 -- from time to time. That doesn't really suit well to our use case. So we
 -- directly use its REST API.
 module Cabal2Pkg.Hackage
-  ( AvailableVersions(..)
-  , fetchHackageVersions
-  , fetchHackageCabal
+  ( PackageStatus(..)
+  , AvailableVersions(..)
+  , latestPreferred
+
+    -- * I/O
+  , fetchAvailableVersions
+  , fetchCabal
   ) where
 
-import Cabal2Pkg.CmdLine (CLI, fatal, hackageURI)
+import Cabal2Pkg.CmdLine (CLI, info, fatal, hackageURI)
+import Cabal2Pkg.Pretty (prettyAnsi)
 import Control.Monad.Catch (MonadThrow)
 import Control.Monad.Trans.Class (lift)
+import Data.Aeson.Key qualified as K
 import Data.Aeson.KeyMap qualified as KM
 import Data.Aeson.TH qualified as ATH
 import Data.Aeson.Types (FromJSON(..), withObject)
@@ -22,14 +28,17 @@ import Data.ByteString.Lazy (toStrict)
 import Data.Char (toLower)
 import Data.Conduit ((.|), ConduitT, yield)
 import Data.Conduit.Combinators (sinkLazy)
+import Data.Foldable (find)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as M
+import Data.Maybe (fromJust)
 import Data.Text qualified as T
 import Data.Text.Encoding (decodeUtf8Lenient)
 import Distribution.Parsec (eitherParsec)
 import Distribution.Pretty (prettyShow)
 import Distribution.Types.PackageName (PackageName)
 import Distribution.Types.Version (Version)
+import GHC.Stack (HasCallStack)
 import Lens.Micro ((&), (%~))
 import Network.HTTP.Media qualified as MT
 import Network.HTTP.Simple
@@ -39,24 +48,23 @@ import Network.HTTP.Types
   ( hContentType, statusCode, statusMessage, statusIsSuccessful )
 import Network.URI (URI(..), uriToString)
 import Network.URI.Lens (uriPathLens)
-import Prettyprinter ((<+>))
 import Prettyprinter qualified as PP
 import System.FilePath.Posix qualified as FP
 import System.OsPath.Posix (PosixPath)
-import System.OsPath.Posix qualified as OPP
+import System.OsPath.Posix qualified as OP
 
 data PackageStatus =
     -- ^This version is good to use.
     Normal
-    -- ^This version has a known defect.
+    -- ^This version has known defects.
   | Deprecated
   deriving (Eq, Show)
 
 $(ATH.deriveJSON
-   ATH.defaultOptions { ATH.constructorTagModifier = map toLower }
+   ATH.defaultOptions { ATH.constructorTagModifier = (toLower <$>) }
    ''PackageStatus)
 
-newtype AvailableVersions = AV (Map Version PackageStatus)
+newtype AvailableVersions = AV { unAV :: Map Version PackageStatus }
 
 -- |The JSON representation of this object is like:
 -- > {
@@ -67,19 +75,31 @@ newtype AvailableVersions = AV (Map Version PackageStatus)
 instance FromJSON AvailableVersions where
   parseJSON = withObject "AvailableVersions" $
               \obj ->
-                AV . M.fromList <$> mapM go (M.toList $ KM.toMapText obj)
+                AV . M.fromList <$> mapM go (KM.toList obj)
     where
       go (key, val) =
-        do ver <- case eitherParsec $ T.unpack key of
+        do ver <- case eitherParsec . T.unpack . K.toText $ key of
                     Right ver -> pure ver
                     Left  e   -> fail (show e)
            st  <- parseJSON val
            pure (ver, st)
 
--- |Fetch a set of available versions for a given package.
-fetchHackageVersions :: PackageName -> CLI AvailableVersions
-fetchHackageVersions name =
-  do hackage <- hackageURI
+-- |Get the latest non-deprecated version. This function is partial because
+-- a package may have no preferred versions in theory.
+latestPreferred :: HasCallStack => AvailableVersions -> Version
+latestPreferred = fst . fromJust . find p . M.toDescList . unAV
+  where
+    p :: (Version, PackageStatus) -> Bool
+    p (_, Normal    ) = True
+    p (_, Deprecated) = False
+
+-- |Fetch the set of available versions for a given package.
+fetchAvailableVersions :: PackageName -> CLI AvailableVersions
+fetchAvailableVersions name =
+  do info $ PP.hsep [ "Fetching the set of available versions for"
+                    , prettyAnsi name <> "..."
+                    ]
+     hackage <- hackageURI
      req     <- parseRequest $ uriToString id (avURI hackage) ""
      getResponseBody <$> httpJSON req
   where
@@ -94,14 +114,14 @@ fetchHackageVersions name =
                   ]
 
 -- |Fetch a .cabal file from the Hackage for a given package.
-fetchHackageCabal :: PackageName
-                  -> Maybe Version
-                  -> ConduitT i (PosixPath, ByteString) CLI ()
-fetchHackageCabal name mVer =
+fetchCabal :: PackageName
+           -> Maybe Version
+           -> ConduitT i (PosixPath, ByteString) CLI ()
+fetchCabal name mVer =
   do hackage <- lift hackageURI
      req     <- parseRequest $ uriToString id (cabalURI hackage)""
      cabal   <- toStrict <$> (httpSource req getCabal .| sinkLazy)
-     file    <- OPP.encodeUtf cabalFile
+     file    <- OP.encodeUtf cabalFile
      yield (file, cabal)
   where
     -- We generate
@@ -114,7 +134,7 @@ fetchHackageCabal name mVer =
       hackage & uriPathLens %~ \base ->
       FP.joinPath [ base
                   , "package"
-                  , prettyShow name <> maybe mempty (("-" <>) . prettyShow) mVer
+                  , prettyShow name <> foldMap (("-" <>) . prettyShow) mVer
                   , "revision"
                   , "0.cabal"
                   ]
@@ -122,7 +142,7 @@ fetchHackageCabal name mVer =
     cabalFile :: FilePath
     cabalFile =
       mconcat [ prettyShow name
-              , maybe mempty (("-" <>) . prettyShow) mVer
+              , foldMap (("-" <>) . prettyShow) mVer
               , ".cabal"
               ]
 
@@ -136,15 +156,17 @@ fetchHackageCabal name mVer =
             | isCabal cType ->
                 getResponseBody res
           ts ->
-            fatal ( "Couldn't fetch a package description from Hackage:" <+>
-                    "Bad media type:" <+>
-                    PP.viaShow ts )
+            fatal $ PP.hsep [ "Couldn't fetch a package description from Hackage:"
+                            , "Bad media type:"
+                            , PP.viaShow ts
+                            ]
       else
         let sc = getResponseStatus res
         in
-          fatal ( "Couldn't fetch a package description from Hackage:" <+>
-                  PP.pretty (statusCode sc) <+>
-                  PP.pretty (decodeUtf8Lenient . statusMessage $ sc) )
+          fatal $ PP.hsep [ "Couldn't fetch a package description from Hackage:"
+                          , PP.pretty (statusCode sc)
+                          , PP.pretty (decodeUtf8Lenient . statusMessage $ sc)
+                          ]
 
     isCabal :: ByteString -> Bool
     isCabal cType =

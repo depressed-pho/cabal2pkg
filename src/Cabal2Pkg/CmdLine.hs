@@ -43,6 +43,7 @@ module Cabal2Pkg.CmdLine
   , runMake
   ) where
 
+import Cabal2Pkg.Pretty (prettyAnsi)
 import Cabal2Pkg.Static (makeQ)
 import Control.Applicative ((<|>), (<**>), many, optional)
 import Control.Concurrent.Deferred (Deferred, defer, force)
@@ -75,7 +76,7 @@ import Distribution.Types.Flag (FlagName)
 import Distribution.Types.Flag qualified as C
 import Distribution.Types.Version (Version)
 import Distribution.Verbosity (silent)
-import GHC.Paths.OsPath qualified as Paths
+import GHC.Paths.PosixPath qualified as Paths
 import Network.URI (URI, parseAbsoluteURI, parseURIReference)
 import Network.URI.Static (uri)
 import Options.Applicative (Parser, ParserInfo, ParserPrefs, ReadM)
@@ -87,12 +88,12 @@ import Prettyprinter qualified as PP
 import Prettyprinter.Render.Terminal (AnsiStyle)
 import Prettyprinter.Render.Terminal qualified as PP
 import System.Console.ANSI (hNowSupportsANSI)
-import System.Directory.OsPath (doesFileExist, canonicalizePath)
+import System.Directory.PosixPath (doesFileExist, canonicalizePath)
 import System.Environment (lookupEnv)
-import System.Exit (ExitCode(ExitFailure), exitWith)
-import System.IO (stderr, utf8, utf16le)
-import System.OsPath qualified as OP
-import System.OsPath ((</>), OsPath, osp)
+import System.Exit (ExitCode, exitFailure)
+import System.IO (stderr)
+import System.OsPath.Posix ((</>), PosixPath, pstr)
+import System.OsPath.Posix qualified as OP
 import System.Process.Typed qualified as PT
 import Text.Show.Pretty (ppShow)
 
@@ -105,11 +106,11 @@ data Options
       -- ^'Nothing' denotes @auto@
     , optColour   :: !ColourPref
     , optDebug    :: !Bool
-    , optPkgDir   :: !OsPath
+    , optPkgDir   :: !PosixPath
     , optPkgFlags :: !FlagMap
-    , optGHCCmd   :: !OsPath
+    , optGHCCmd   :: !PosixPath
     , optHackage  :: !URI
-    , optMakeCmd  :: !OsPath
+    , optMakeCmd  :: !PosixPath
     }
   deriving (Show)
 
@@ -140,7 +141,7 @@ optionsP noColor =
         OA.help "The path to the pkgsrc package to work with" <>
         OA.action "directory" <>
         OA.showDefault <>
-        OA.value [osp|.|] <>
+        OA.value [pstr|.|] <>
         OA.metavar "DIR"
       )
   <*> ( M.unions <$> many
@@ -197,11 +198,11 @@ defaultColourPref noColor
   | noColor   = Never
   | otherwise = Auto
 
-path :: ReadM OsPath
+path :: ReadM PosixPath
 path = OA.eitherReader f
   where
-    f :: String -> Either String OsPath
-    f = first show . OP.encodeWith utf8 utf16le
+    f :: String -> Either String PosixPath
+    f = first show . OP.encodeUtf
 
 flagMap :: ReadM FlagMap
 flagMap = OA.eitherReader f
@@ -230,9 +231,10 @@ data InitOptions
     }
   deriving (Show)
 
-newtype UpdateOptions
+data UpdateOptions
   = UpdateOptions
-    { optPackageURI :: Maybe URI
+    { optForce      :: !Bool
+    , optPackageURI :: !(Maybe URI)
     }
   deriving (Show)
 
@@ -269,8 +271,14 @@ commandP =
 
     updateP :: Parser Command
     updateP =
-      Update . UpdateOptions
-      <$> optional
+      (Update .) . UpdateOptions
+      <$> OA.switch
+          ( OA.long "force" <>
+            OA.short 'f' <>
+            OA.help ( "Update the package forcefully even if the requested" <>
+                      " version is not a preferred one" )
+          )
+      <*> optional
           ( OA.argument uriReference
             ( OA.help ( "http, https, or file URI to an updated package" <>
                         " tarball. Or just a version number like" <>
@@ -320,7 +328,7 @@ data Context
   = Context
     { ctxOptions     :: !Options
     , ctxUseColour   :: !Bool
-    , ctxCanonPkgDir :: !(Deferred CLI OsPath)
+    , ctxCanonPkgDir :: !(Deferred CLI PosixPath)
     , ctxProgDb      :: !(Deferred CLI ProgramDb)
     , ctxIPI         :: !(Deferred CLI InstalledPackageIndex)
     , ctxSrcDb       :: !(Deferred CLI (SrcDb CLI))
@@ -345,16 +353,14 @@ initialCtx opts
          , ctxSrcDb       = sdb
          }
 
-mkCanonPkgDir :: CLI OsPath
+mkCanonPkgDir :: CLI PosixPath
 mkCanonPkgDir =
   do dir  <- (liftIO . canonicalizePath) . optPkgDir =<< options
      -- Does it look like a package directory?
-     p    <- liftIO $ doesFileExist (dir </> [osp|../../mk/bsd.pkg.mk|])
+     p    <- liftIO $ doesFileExist (dir </> [pstr|../../mk/bsd.pkg.mk|])
      unless p $
-       do dir' <- T.pack <$> OP.decodeUtf dir
-          fatal ( PP.dquotes (PP.annotate (PP.color PP.Cyan) (PP.pretty dir')) <+>
-                  "doesn't look like a pkgsrc package directory"
-                )
+       fatal ( prettyAnsi dir <+>
+               "doesn't look like a pkgsrc package directory" )
      pure dir
 
 mkProgDb :: CLI ProgramDb
@@ -416,13 +422,17 @@ instance Monoid a => Monoid (CLI a) where
 instance Semigroup a => Semigroup (CLI a) where
   (<>) = liftA2 (<>)
 
+-- |Run the 'CLI' monad in 'IO'. When a synchronous exception except for
+-- 'ExitCode' is thrown, the function catches it, prints it to 'stderr',
+-- and then invokes 'exitFailure'.
 runCLI :: CLI a -> IO a
 runCLI m =
   do opts <- parseOptions
      ctx  <- initialCtx opts
      runResourceT (runReaderT (unCLI m) ctx)
        `catches`
-       [ Handler $ \(e :: CommandError ) -> die ctx $ message e
+       [ Handler $ \(e :: ExitCode     ) -> throw e
+       , Handler $ \(e :: CommandError ) -> die ctx $ message e
        , Handler $ \(e :: SomeException) -> die ctx $ PP.viaShow e
        ]
   where
@@ -430,7 +440,7 @@ runCLI m =
     die ctx e =
       do useColour <- pure . ctxUseColour $ ctx
          print' useColour $ msgDoc e
-         exitWith (ExitFailure 1)
+         exitFailure
 
     msgDoc :: Doc AnsiStyle -> Doc AnsiStyle
     msgDoc e =
@@ -450,30 +460,26 @@ options = CLI $ asks ctxOptions
 command :: CLI Command
 command = optCommand <$> options
 
-origPkgDir :: CLI OsPath
+origPkgDir :: CLI PosixPath
 origPkgDir = optPkgDir <$> options
 
-canonPkgDir :: CLI OsPath
+canonPkgDir :: CLI PosixPath
 canonPkgDir = CLI (asks ctxCanonPkgDir) >>= force
 
 -- |@-d /.../devel/foo@ => @devel/foo@
-pkgPath :: CLI Text
+pkgPath :: CLI PosixPath
 pkgPath =
-  do dir  <- canonPkgDir
-     name <- OP.decodeUtf . OP.takeFileName $ dir
-     cat  <- OP.decodeUtf . OP.takeFileName . OP.takeDirectory $ dir
-     pure . T.pack $ cat <> "/" <> name
+  do cat  <- pkgCategory
+     base <- pkgBase
+     pure $ cat </> base
 
 -- |@-d /.../devel/foo@ => @foo@
-pkgBase :: CLI Text
-pkgBase = pathToText . OP.takeFileName =<< canonPkgDir
+pkgBase :: CLI PosixPath
+pkgBase = OP.takeFileName <$> canonPkgDir
 
 -- |@-d /.../devel/foo@ => @devel@
-pkgCategory :: CLI Text
-pkgCategory = pathToText . OP.takeFileName . OP.takeDirectory =<< canonPkgDir
-
-pathToText :: MonadThrow m => OsPath -> m Text
-pathToText = (T.pack <$>) . OP.decodeUtf
+pkgCategory :: CLI PosixPath
+pkgCategory = OP.takeFileName . OP.takeDirectory <$> canonPkgDir
 
 maintainer :: CLI (Maybe Text)
 maintainer =
@@ -482,7 +488,7 @@ maintainer =
      m1 <- liftIO $ lookupEnv "REPLYTO"
      pure $ T.pack <$> (m0 <|> m1)
 
-makeCmd :: CLI OsPath
+makeCmd :: CLI PosixPath
 makeCmd = optMakeCmd <$> options
 
 pkgFlags :: CLI FlagMap

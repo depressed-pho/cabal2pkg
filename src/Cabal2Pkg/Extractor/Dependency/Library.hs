@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE QuasiQuotes #-}
 module Cabal2Pkg.Extractor.Dependency.Library
   ( LibDep(..)
   , extractLibDep
@@ -19,6 +20,8 @@ import Distribution.Types.VersionRange qualified as C
 import Data.List (isSuffixOf)
 import Data.Text (Text)
 import Data.Text qualified as T
+import System.OsPath.Posix (pstr)
+import System.OsPath.Posix qualified as OP
 
 
 -- |Dependency on a library provided by either the compiler or a pkgsrc
@@ -106,22 +109,21 @@ findPkgsrcPkg name
        -- concurrently? I'd say no, because most of the time packages with
        -- the prefix "hs-" is what we would find, and the other search
        -- would just be a waste of CPU cycles.
-       p0 <- SrcDb.findPackageByNameCI db ("hs-" <> name')
+       name' <- OP.encodeUtf . C.unPackageName $ name
+       p0    <- SrcDb.findPackageByNameCI db ([pstr|hs-|] <> name')
        case p0 of
          Just p  -> found p
          Nothing ->
            do p1 <- SrcDb.findPackageByNameCI db name'
               join <$> traverse found p1
   where
-    name' :: Text
-    name' = T.pack . C.unPackageName $ name
-
     found :: Package CLI -> CLI (Maybe (Text, Version))
     found pkg
       = do hask <- SrcDb.includesHaskellMk pkg
            if hask
-             then do ver <- toCabalVer =<< SrcDb.pkgVersionNoRev pkg
-                     pure $ Just (SrcDb.pkgPath pkg, ver)
+             then do ver  <- toCabalVer =<< SrcDb.pkgVersionNoRev pkg
+                     path <- T.pack <$> OP.decodeUtf (SrcDb.pkgPath pkg)
+                     pure $ Just (path, ver)
              else pure Nothing
 
     toCabalVer :: MonadFail m => Text -> m Version
