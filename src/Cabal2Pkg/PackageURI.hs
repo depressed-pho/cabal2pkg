@@ -61,8 +61,7 @@ parseHTTPURI uri = fromMaybe (HTTP uri) . go <$> hackageURI
                      in
                        Just $ L.drop nDrop segs
          pkgId    <- listToMaybe . toList $ eitherParsec s1
-         (name, ".tar.gz")
-                  <- Just $ FP.splitExtensions s2
+         name     <- FP.stripExtension ".tar.gz" s2
          pkgId'   <- listToMaybe . toList $ eitherParsec name
          unless (pkgId == pkgId') $
            fail "package ID mismatch"

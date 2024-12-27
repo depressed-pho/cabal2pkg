@@ -1,5 +1,6 @@
 module Cabal2Pkg.Pretty
   ( PrettyAnsi(..)
+  , Quoted(..)
   ) where
 
 import Distribution.Pretty (prettyShow)
@@ -19,13 +20,13 @@ class PrettyAnsi a where
   prettyAnsi :: a -> Doc AnsiStyle
 
 instance PrettyAnsi OsString where
-  prettyAnsi = PP.dquotes . PP.annotate (PP.colorDull PP.Cyan) . ppr'
+  prettyAnsi = prettyAnsi . Quoted . ppr'
     where
       ppr' :: OsString -> Doc ann
       ppr' = either (error . show) PP.pretty . OP.decodeUtf
 
 instance PrettyAnsi PosixString where
-  prettyAnsi = PP.dquotes . PP.annotate (PP.colorDull PP.Cyan) . ppr'
+  prettyAnsi = prettyAnsi . Quoted . ppr'
     where
       ppr' :: PosixString -> Doc ann
       ppr' = either (error . show) PP.pretty . OPP.decodeUtf
@@ -37,4 +38,11 @@ instance PrettyAnsi Version where
   prettyAnsi = PP.annotate (PP.colorDull PP.Green) . PP.pretty . prettyShow
 
 instance PrettyAnsi URI where
-  prettyAnsi = PP.dquotes . PP.annotate (PP.colorDull PP.Cyan) . PP.viaShow
+  prettyAnsi = prettyAnsi . Quoted . PP.viaShow
+
+
+newtype Quoted = Quoted (Doc AnsiStyle)
+
+instance PrettyAnsi Quoted where
+  prettyAnsi (Quoted doc) =
+    PP.dquotes (PP.annotate (PP.colorDull PP.Cyan) doc)

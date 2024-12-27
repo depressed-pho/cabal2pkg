@@ -23,6 +23,9 @@ module Database.Pkgsrc.SrcDb
   , extractSufx
   , maintainer
   , masterSites
+  , githubProject
+  , gitlabProject
+  , configureArgs
   , includesHaskellMk
   ) where
 
@@ -85,6 +88,9 @@ data Package m
     , pEXTRACT_SUFX      :: Deferred m PosixString
     , pMAINTAINER        :: Deferred m Text
     , pMASTER_SITES      :: Deferred m [URI]
+    , pGITHUB_PROJECT    :: Deferred m (Maybe Text)
+    , pGITLAB_PROJECT    :: Deferred m (Maybe Text)
+    , pCONFIGURE_ARGS    :: Deferred m [Text]
     , pIncludesHaskellMk :: Deferred m Bool
     }
 
@@ -126,13 +132,39 @@ instance Alternative Getter where
       r        -> r
 
   many :: forall a. Getter a -> Getter [a]
-  many g = Getter $ go . T.words
+  many g = Getter $ go . mkWords
     where
       go :: [Text] -> Either String [a]
       go []     = Right []
       go (w:ws) = case runGetter g w of
                     Left  e -> Left e
                     Right a -> (a :) <$> go ws
+
+-- |This is similar to T.words but we need to concatenate words joined
+-- with '\ '.
+mkWords :: Text -> [Text]
+mkWords = go False mempty
+  where
+    -- This is obviously inefficient but optimisation is probably not worth
+    -- it.
+    go :: Bool -> Text -> Text -> [Text]
+    go esc word txt =
+      case T.uncons txt of
+        Nothing ->
+          [word | not (T.null word)]
+
+        Just (c, rest)
+          | c == ' '  -> if esc then
+                           go False (word `T.snoc` c) rest
+                         else
+                           let ws = go False mempty rest
+                           in
+                             if T.null word then
+                               ws
+                             else
+                               word : ws
+          | c == '\\' -> go (not esc) (word `T.snoc` c) rest
+          | otherwise -> go False     (word `T.snoc` c) rest
 
 get :: HasCallStack => Text -> Getter a -> VarMap -> a
 get var g vm =
@@ -146,7 +178,12 @@ exists :: Getter Bool
 exists = Getter $ Right . not . T.null
 
 text :: Getter Text
-text = Getter Right
+text =
+  Getter $ \txt ->
+  if T.null txt then
+    Left "variable empty or undefined"
+  else
+    Right txt
 
 -- |This doesn't accept an empty string.
 posixStr :: Getter PosixString
@@ -189,7 +226,7 @@ createSrcDb makePath root = SrcDb <$> cats <*> dists
 
     deferCat :: PosixPath -> m (PosixPath, Deferred m (Category m))
     deferCat catName =
-      ((,) catName) <$> defer (mkCat catName)
+      (catName, ) <$> defer (mkCat catName)
 
     mkCat :: PosixPath -> m (Category m)
     mkCat catName =
@@ -253,7 +290,7 @@ scanPkgs makePath root catName =
 
     deferPkg :: PosixPath -> m (PosixPath, Deferred m (Package m))
     deferPkg dirName =
-      ((,) dirName) <$> defer (mkPkg dirName)
+      (dirName, ) <$> defer (mkPkg dirName)
 
     mkPkg :: PosixPath -> m (Package m)
     mkPkg dirName =
@@ -267,6 +304,9 @@ scanPkgs makePath root catName =
                            , "EXTRACT_SUFX"
                            , "MAINTAINER"
                            , "MASTER_SITES"
+                           , "GITHUB_PROJECT"
+                           , "GITLAB_PROJECT"
+                           , "CONFIGURE_ARGS"
                            , "HASKELL_PKG_NAME"
                            ]
          pure Package
@@ -279,6 +319,9 @@ scanPkgs makePath root catName =
            , pEXTRACT_SUFX      = get "EXTRACT_SUFX"     posixStr            <$> vars
            , pMAINTAINER        = get "MAINTAINER"       text                <$> vars
            , pMASTER_SITES      = get "MASTER_SITES"     (many uri)          <$> vars
+           , pGITHUB_PROJECT    = get "GITHUB_PROJECT"   (optional text)     <$> vars
+           , pGITLAB_PROJECT    = get "GITLAB_PROJECT"   (optional text)     <$> vars
+           , pCONFIGURE_ARGS    = get "CONFIGURE_ARGS"   (many text)         <$> vars
            , pIncludesHaskellMk = get "HASKELL_PKG_NAME" exists              <$> vars
            }
 
@@ -397,6 +440,15 @@ maintainer = force . pMAINTAINER
 
 masterSites :: MonadUnliftIO m => Package m -> m [URI]
 masterSites = force . pMASTER_SITES
+
+githubProject :: MonadUnliftIO m => Package m -> m (Maybe Text)
+githubProject = force . pGITHUB_PROJECT
+
+gitlabProject :: MonadUnliftIO m => Package m -> m (Maybe Text)
+gitlabProject = force . pGITLAB_PROJECT
+
+configureArgs :: MonadUnliftIO m => Package m -> m [Text]
+configureArgs = force . pCONFIGURE_ARGS
 
 includesHaskellMk :: MonadUnliftIO m => Package m -> m Bool
 includesHaskellMk = force . pIncludesHaskellMk

@@ -27,11 +27,16 @@ module Cabal2Pkg.CmdLine
   , maintainer
   , makeCmd
   , pkgFlags
+  , showPkgFlags
   , progDb
   , ghcVersion
   , hackageURI
   , installedPkgs
   , srcDb
+
+    -- * Modifying the context
+  , withPkgFlagsHidden
+  , withPkgFlagsModified
 
     -- * Message output
   , debug
@@ -54,7 +59,7 @@ import Control.Monad.Catch (MonadCatch, MonadThrow)
 import Control.Monad.Fix (MonadFix)
 import Control.Monad.IO.Unlift (MonadIO, MonadUnliftIO, liftIO)
 import Control.Monad.Primitive (PrimMonad(..))
-import Control.Monad.Trans.Reader (ReaderT, runReaderT, asks)
+import Control.Monad.Trans.Reader (ReaderT, runReaderT, asks, local)
 import Control.Monad.Trans.Resource (MonadResource, ResourceT, runResourceT)
 import Data.Bifunctor (first, second)
 import Data.Map.Strict (Map)
@@ -81,6 +86,8 @@ import Network.URI (URI, parseAbsoluteURI, parseURIReference)
 import Network.URI.Static (uri)
 import Options.Applicative (Parser, ParserInfo, ParserPrefs, ReadM)
 import Options.Applicative qualified as OA
+import Lens.Micro ((^.), (.~), (%~))
+import Lens.Micro.TH (makeLenses)
 import PackageInfo_cabal2pkg qualified as PI
 import Prelude hiding (print)
 import Prettyprinter ((<+>), Doc)
@@ -98,21 +105,94 @@ import System.Process.Typed qualified as PT
 import Text.Show.Pretty (ppShow)
 
 
+data Command
+  = Init   !InitOptions
+  | Update !UpdateOptions
+  deriving (Show)
+
+data InitOptions
+  = InitOptions
+    { optOverwrite  :: !Bool
+    , optPackageURI :: !URI
+    }
+  deriving (Show)
+
+data UpdateOptions
+  = UpdateOptions
+    { optForce      :: !Bool
+    , optPackageURI :: !(Maybe URI)
+    }
+  deriving (Show)
+
+data ColourPref = Always | Never | Auto
+
+instance Show ColourPref where
+  show Always = "always"
+  show Never  = "never"
+  show Auto   = "auto"
+
 type FlagMap = Map FlagName Bool
 
 data Options
   = Options
-    { optCommand  :: !Command
+    { _optCommand  :: !Command
       -- ^'Nothing' denotes @auto@
-    , optColour   :: !ColourPref
-    , optDebug    :: !Bool
-    , optPkgDir   :: !PosixPath
-    , optPkgFlags :: !FlagMap
-    , optGHCCmd   :: !PosixPath
-    , optHackage  :: !URI
-    , optMakeCmd  :: !PosixPath
+    , _optColour   :: !ColourPref
+    , _optDebug    :: !Bool
+    , _optPkgDir   :: !PosixPath
+    , _optPkgFlags :: !FlagMap
+    , _optGHCCmd   :: !PosixPath
+    , _optHackage  :: !URI
+    , _optMakeCmd  :: !PosixPath
     }
   deriving (Show)
+makeLenses ''Options
+
+newtype CLI a = CLI { unCLI :: ReaderT Context (ResourceT IO) a }
+  deriving newtype ( Applicative
+                   , Functor
+                   , Monad
+                   , MonadCatch
+                   , MonadFix
+                   , MonadIO
+                   , MonadMask
+                   , MonadResource
+                   , MonadThrow
+                   , MonadUnliftIO
+                   , PrimMonad
+                   )
+
+newtype CommandError = CommandError { message :: Doc AnsiStyle }
+  deriving stock    Show
+  deriving anyclass Exception
+
+-- |Print an error message to 'stderr' and abort the process. The message
+-- should not end with a linebreak.
+fatal :: MonadThrow m => Doc AnsiStyle -> m a
+fatal = throw . CommandError
+
+instance MonadFail CLI where
+  fail :: String -> CLI a
+  fail = fatal . PP.pretty . T.pack
+
+instance Monoid a => Monoid (CLI a) where
+  mempty = pure mempty
+
+instance Semigroup a => Semigroup (CLI a) where
+  (<>) = liftA2 (<>)
+
+data Context
+  = Context
+    { _ctxOptions     :: !Options
+    , _ctxUseColour   :: !Bool
+      -- ^Display flags defined in .cabal files.
+    , _ctxShowFlags   :: !Bool
+    , _ctxCanonPkgDir :: !(Deferred CLI PosixPath)
+    , _ctxProgDb      :: !(Deferred CLI ProgramDb)
+    , _ctxIPI         :: !(Deferred CLI InstalledPackageIndex)
+    , _ctxSrcDb       :: !(Deferred CLI (SrcDb CLI))
+    }
+makeLenses ''Context
 
 optionsP :: Bool -> Parser Options
 optionsP noColor =
@@ -177,13 +257,6 @@ optionsP noColor =
         OA.metavar "FILE"
       )
 
-data ColourPref = Always | Never | Auto
-
-instance Show ColourPref where
-  show Always = "always"
-  show Never  = "never"
-  show Auto   = "auto"
-
 colourPref :: ReadM ColourPref
 colourPref = OA.eitherReader f
   where
@@ -218,25 +291,6 @@ absoluteURI = OA.maybeReader parseAbsoluteURI
 
 uriReference :: ReadM URI
 uriReference = OA.maybeReader parseURIReference
-
-data Command
-  = Init   !InitOptions
-  | Update !UpdateOptions
-  deriving (Show)
-
-data InitOptions
-  = InitOptions
-    { optOverwrite  :: !Bool
-    , optPackageURI :: !URI
-    }
-  deriving (Show)
-
-data UpdateOptions
-  = UpdateOptions
-    { optForce      :: !Bool
-    , optPackageURI :: !(Maybe URI)
-    }
-  deriving (Show)
 
 commandP :: Parser Command
 commandP =
@@ -289,7 +343,6 @@ commandP =
             )
           )
 
-
 -- https://no-color.org/
 -- FIXME: Document this env var
 lookupNoColor :: MonadIO m => m Bool
@@ -324,19 +377,9 @@ parseOptions =
     ver = showVersion PI.version
 
 
-data Context
-  = Context
-    { ctxOptions     :: !Options
-    , ctxUseColour   :: !Bool
-    , ctxCanonPkgDir :: !(Deferred CLI PosixPath)
-    , ctxProgDb      :: !(Deferred CLI ProgramDb)
-    , ctxIPI         :: !(Deferred CLI InstalledPackageIndex)
-    , ctxSrcDb       :: !(Deferred CLI (SrcDb CLI))
-    }
-
 initialCtx :: (MonadThrow m, MonadUnliftIO m) => Options -> m Context
 initialCtx opts
-  = do col   <- case optColour opts of
+  = do col   <- case opts ^. optColour of
                   Always -> pure True
                   Never  -> pure False
                   Auto   -> liftIO $ hNowSupportsANSI stderr
@@ -345,17 +388,18 @@ initialCtx opts
        ipi   <- defer readPkgDb
        sdb   <- defer mkSrcDb
        pure Context
-         { ctxOptions     = opts
-         , ctxUseColour   = col
-         , ctxCanonPkgDir = pDir
-         , ctxProgDb      = progs
-         , ctxIPI         = ipi
-         , ctxSrcDb       = sdb
+         { _ctxOptions     = opts
+         , _ctxUseColour   = col
+         , _ctxShowFlags   = True
+         , _ctxCanonPkgDir = pDir
+         , _ctxProgDb      = progs
+         , _ctxIPI         = ipi
+         , _ctxSrcDb       = sdb
          }
 
 mkCanonPkgDir :: CLI PosixPath
 mkCanonPkgDir =
-  do dir  <- (liftIO . canonicalizePath) . optPkgDir =<< options
+  do dir  <- (liftIO . canonicalizePath) . (^. optPkgDir) =<< options
      -- Does it look like a package directory?
      p    <- liftIO $ doesFileExist (dir </> [pstr|../../mk/bsd.pkg.mk|])
      unless p $
@@ -366,7 +410,7 @@ mkCanonPkgDir =
 mkProgDb :: CLI ProgramDb
 mkProgDb =
   do debug "Configuring program database..."
-     ghcCmd      <- OP.decodeUtf . optGHCCmd =<< options
+     ghcCmd      <- OP.decodeUtf . (^. optGHCCmd) =<< options
      (_, _, db0) <- liftIO $
                     GHC.configure silent (Just ghcCmd) Nothing C.defaultProgramDb
      db1         <- liftIO $
@@ -389,38 +433,9 @@ readPkgDb =
 
 mkSrcDb :: CLI (SrcDb CLI)
 mkSrcDb =
-  do make <- optMakeCmd <$> options
+  do make <- (^. optMakeCmd) <$> options
      root <- OP.takeDirectory . OP.takeDirectory <$> canonPkgDir
      createSrcDb make root
-
-
-newtype CommandError = CommandError { message :: Doc AnsiStyle }
-  deriving stock    Show
-  deriving anyclass Exception
-
-newtype CLI a = CLI { unCLI :: ReaderT Context (ResourceT IO) a }
-  deriving newtype ( Applicative
-                   , Functor
-                   , Monad
-                   , MonadCatch
-                   , MonadFix
-                   , MonadIO
-                   , MonadMask
-                   , MonadResource
-                   , MonadThrow
-                   , MonadUnliftIO
-                   , PrimMonad
-                   )
-
-instance MonadFail CLI where
-  fail :: String -> CLI a
-  fail = fatal . PP.pretty . T.pack
-
-instance Monoid a => Monoid (CLI a) where
-  mempty = pure mempty
-
-instance Semigroup a => Semigroup (CLI a) where
-  (<>) = liftA2 (<>)
 
 -- |Run the 'CLI' monad in 'IO'. When a synchronous exception except for
 -- 'ExitCode' is thrown, the function catches it, prints it to 'stderr',
@@ -438,8 +453,7 @@ runCLI m =
   where
     die :: Context -> Doc AnsiStyle -> IO a
     die ctx e =
-      do useColour <- pure . ctxUseColour $ ctx
-         print' useColour $ msgDoc e
+      do print' (ctx ^. ctxUseColour) (msgDoc e)
          exitFailure
 
     msgDoc :: Doc AnsiStyle -> Doc AnsiStyle
@@ -455,16 +469,16 @@ runCLI m =
     baseStyle = PP.colorDull PP.Red
 
 options :: CLI Options
-options = CLI $ asks ctxOptions
+options = CLI $ asks (^. ctxOptions)
 
 command :: CLI Command
-command = optCommand <$> options
+command = (^. optCommand) <$> options
 
 origPkgDir :: CLI PosixPath
-origPkgDir = optPkgDir <$> options
+origPkgDir = (^. optPkgDir) <$> options
 
 canonPkgDir :: CLI PosixPath
-canonPkgDir = CLI (asks ctxCanonPkgDir) >>= force
+canonPkgDir = CLI (asks (^. ctxCanonPkgDir)) >>= force
 
 -- |@-d /.../devel/foo@ => @devel/foo@
 pkgPath :: CLI PosixPath
@@ -489,13 +503,16 @@ maintainer =
      pure $ T.pack <$> (m0 <|> m1)
 
 makeCmd :: CLI PosixPath
-makeCmd = optMakeCmd <$> options
+makeCmd = (^. optMakeCmd) <$> options
 
 pkgFlags :: CLI FlagMap
-pkgFlags = optPkgFlags <$> options
+pkgFlags = (^. optPkgFlags) <$> options
+
+showPkgFlags :: CLI Bool
+showPkgFlags = CLI $ asks (^. ctxShowFlags)
 
 progDb :: CLI ProgramDb
-progDb = CLI (asks ctxProgDb) >>= force
+progDb = CLI (asks (^. ctxProgDb)) >>= force
 
 ghcVersion :: CLI Version
 ghcVersion
@@ -506,16 +523,16 @@ ghcVersion
        pure ver
 
 hackageURI :: CLI URI
-hackageURI = optHackage <$> options
+hackageURI = (^. optHackage) <$> options
 
 installedPkgs :: CLI InstalledPackageIndex
-installedPkgs = CLI (asks ctxIPI) >>= force
+installedPkgs = CLI (asks (^. ctxIPI)) >>= force
 
 srcDb :: CLI (SrcDb CLI)
-srcDb = CLI (asks ctxSrcDb) >>= force
+srcDb = CLI (asks (^. ctxSrcDb)) >>= force
 
 print :: Doc AnsiStyle -> CLI ()
-print = (CLI (asks ctxUseColour) >>=) . flip print'
+print = (CLI (asks (^. ctxUseColour)) >>=) . flip print'
 
 print' :: MonadIO m => Bool -> Doc AnsiStyle -> m ()
 print' useColour doc =
@@ -529,11 +546,23 @@ progName :: Doc AnsiStyle
 progName =
   PP.annotate PP.bold . PP.pretty . T.pack $ PI.name
 
+withPkgFlagsHidden :: CLI a -> CLI a
+withPkgFlagsHidden = CLI . local g . unCLI
+  where
+    g :: Context -> Context
+    g = ctxShowFlags .~ False
+
+withPkgFlagsModified :: (FlagMap -> FlagMap) -> CLI a -> CLI a
+withPkgFlagsModified f = CLI . local g . unCLI
+  where
+    g :: Context -> Context
+    g = ctxOptions . optPkgFlags %~ f
+
 -- |Print a debugging message to 'stderr'. The message should not end with
 -- a linebreak.
 debug :: Doc AnsiStyle -> CLI ()
 debug msg =
-  do d <- optDebug <$> options
+  do d <- (^. optDebug) <$> options
      when d $
        print (progName <>
               PP.colon <+>
@@ -567,11 +596,6 @@ warn msg =
   where
     baseStyle :: AnsiStyle
     baseStyle = PP.colorDull PP.Yellow
-
--- |Print an error message to 'stderr' and abort the process. The message
--- should not end with a linebreak.
-fatal :: MonadThrow m => Doc AnsiStyle -> m a
-fatal = throw . CommandError
 
 -- |Run @make(1)@ with the working directory set to 'canonPkgDir'. The
 -- child process is spawned with stdin closed, inheriting stderr, and

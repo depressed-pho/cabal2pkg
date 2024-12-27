@@ -78,6 +78,7 @@ genAST pm
                                          "${DISTNAME:tl}")
                   ]
              <> [ "CATEGORIES" .= categories pm ]
+                -- FIXME: Consider the cases where it's GitHub or GitLab.
              <> case masterSites pm of
                   [] -> []
                   ms -> [ "MASTER_SITES" .= ms ]

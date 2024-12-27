@@ -7,7 +7,8 @@ module Cabal2Pkg.Command.Common
 
 import Cabal2Pkg.Cabal (readCabal)
 import Cabal2Pkg.CmdLine (CLI, debug, info)
-import Cabal2Pkg.PackageURI (PackageURI, isFromHackage)
+import Cabal2Pkg.PackageURI (PackageURI, isFromHackage, renderPackageURI)
+import Cabal2Pkg.Pretty (prettyAnsi)
 import Cabal2Pkg.Extractor
   ( PackageMeta, fillInMasterSites, omitHackageDefaults, summariseCabal )
 import GHC.Stack (HasCallStack)
@@ -34,7 +35,8 @@ option = PP.annotate (PP.colorDull PP.Green)
 fetchMeta :: HasCallStack => PackageURI -> CLI PackageMeta
 fetchMeta uri =
   do info $ PP.hsep [ "Fetching"
-                    , PP.dquotes (PP.viaShow uri) <> "..."
+                    , prettyAnsi (renderPackageURI uri)
+                    , "and analysing its package description..."
                     ]
      cabal <- readCabal uri
      debug $ "Found a package description:\n" <> PP.pretty (ppShow cabal)

@@ -12,7 +12,7 @@ import Cabal2Pkg.CmdLine qualified as CLI
 import Cabal2Pkg.Extractor.Conditional
   ( Environment(..), CondBlock, extractCondBlock )
 import Cabal2Pkg.Extractor.Dependency (DepSet, extractDeps)
-import Control.Monad (unless)
+import Control.Monad (when, unless)
 import Data.Bifunctor (first)
 import Data.Data (Data)
 import Data.Foldable (foldl', toList)
@@ -171,28 +171,30 @@ extractFlags :: FlagMap -> [C.PackageFlag] -> CLI FlagMap
 extractFlags givenFlags flags =
   do let (defaulted, flags') = foldl' go (mempty, mempty) flags
          unknown             = M.keysSet $ M.difference givenFlags flags'
-     unless (null defaulted) $
-       CLI.info ( PP.nest 2 . PP.vsep $
-                  [ PP.hsep $ [ "The package defines the following" ] <>
-                              ( if M.null givenFlags
-                                then ["additional"]
-                                else mempty
-                              ) <>
-                              [ "manual flags. You can override them with"
-                              , "-f or --flags options:"
-                              ]
-                  ] <>
-                  [ PP.pretty '-' <+> pprPF pf
-                  | pf <- defaulted
-                  ]
-                )
-     unless (S.null unknown) $
-       CLI.warn ( PP.nest 2 . PP.vsep $
-                  [ "Ignoring unknown flags:" ] <>
-                  [ PP.pretty '-' <+> PP.pretty (C.unFlagName fn)
-                  | fn <- toList unknown
-                  ]
-                )
+     showFlags <- CLI.showPkgFlags
+     when showFlags $
+       do unless (null defaulted) $
+            CLI.info ( PP.nest 2 . PP.vsep $
+                       [ PP.hsep ( [ "The package defines the following" ] <>
+                                   ( if M.null givenFlags
+                                     then mempty
+                                     else ["additional"]
+                                   ) <>
+                                   [ "manual flags. You can override them with"
+                                   , "-f or --flags options:"
+                                   ] )
+                       ] <>
+                       [ PP.pretty '-' <+> pprPF pf
+                       | pf <- defaulted
+                       ]
+                     )
+          unless (S.null unknown) $
+            CLI.warn ( PP.nest 2 . PP.vsep $
+                       [ "Ignoring unknown flags:" ] <>
+                       [ PP.pretty '-' <+> PP.pretty (C.unFlagName fn)
+                       | fn <- toList unknown
+                       ]
+                     )
      pure flags'
   where
     pprPF :: C.PackageFlag -> Doc ann
