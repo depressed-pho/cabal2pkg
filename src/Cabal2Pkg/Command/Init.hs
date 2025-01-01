@@ -18,7 +18,6 @@ import Cabal2Pkg.PackageURI (parsePackageURI)
 import Cabal2Pkg.Pretty (prettyAnsi)
 import Control.Exception.Safe (catch, throw)
 import Control.Monad (when)
-import Data.ByteString.Lazy qualified as LBS
 import Data.CaseInsensitive qualified as CI
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
@@ -44,33 +43,32 @@ run (InitOptions {..}) =
      -- overwrite existing files unless -w is given.
      let descr = genDESCR meta
      debug $ "Generated DESCR:\n" <> PP.pretty (TL.strip descr)
-     writeFile' [pstr|DESCR|] (TL.encodeUtf8 descr)
+     writeFile' [pstr|DESCR|] descr
 
      let mk = genMakefile meta
      debug $ "Generated Makefile:\n" <> PP.pretty (TL.strip mk)
-     writeFile' [pstr|Makefile|] (TL.encodeUtf8 mk)
+     writeFile' [pstr|Makefile|] mk
 
      when (shouldHaveBuildlink3 meta /= Just False) $
        do let bl3 = genBuildlink3 meta
           debug $ "Generated buildlink3.mk:\n" <> PP.pretty (TL.strip bl3)
-          writeFile' [pstr|buildlink3.mk|] (TL.encodeUtf8 bl3)
+          writeFile' [pstr|buildlink3.mk|] bl3
 
      -- PLIST cannot be directly generated from the package
      -- description. If it already exists we leave them unchanged.
-     plist <- initialPLIST
-     createFile' [pstr|PLIST|] (TL.encodeUtf8 plist)
+     createFile' [pstr|PLIST|] =<< initialPLIST
 
      -- Generate distinfo, but the only way to do it is to run make(1).
      info "Generating distinfo..."
      runMake ["distinfo"]
   where
-    writeFile' :: PosixPath -> LBS.ByteString -> CLI ()
-    writeFile' name bs =
+    writeFile' :: PosixPath -> TL.Text -> CLI ()
+    writeFile' name txt =
       do let f | optOverwrite = writeFile
                | otherwise    = writeFreshFile
          cfp <- (</> name) <$> canonPkgDir
          ofp <- (</> name) <$> origPkgDir
-         f cfp bs `catch` \(e :: IOError) ->
+         f cfp (TL.encodeUtf8 txt) `catch` \(e :: IOError) ->
            if isAlreadyExistsError e then
              fatal $ PP.hsep [ "The file"
                              , prettyAnsi ofp
@@ -83,12 +81,12 @@ run (InitOptions {..}) =
              throw e
          info $ "Wrote " <> prettyAnsi ofp
 
-    createFile' :: PosixPath -> LBS.ByteString -> CLI ()
-    createFile' name bs =
+    createFile' :: PosixPath -> TL.Text -> CLI ()
+    createFile' name txt =
       do cfp  <- (</> name) <$> canonPkgDir
          ofp  <- (</> name) <$> origPkgDir
          ofp' <- PP.pretty <$> OP.decodeUtf ofp
-         ( do writeFreshFile cfp bs
+         ( do writeFreshFile cfp (TL.encodeUtf8 txt)
               info $ "Wrote " <> ofp'
            ) `catch` \(e :: IOError) ->
            if isAlreadyExistsError e then

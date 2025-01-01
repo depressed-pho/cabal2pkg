@@ -67,6 +67,7 @@ import Data.Map.Strict qualified as M
 import Data.Maybe (fromJust)
 import Data.Text (Text)
 import Data.Text qualified as T
+import Data.Text.Lazy.Merge (MarkerStyle(..))
 import Data.Version (showVersion)
 import Database.Pkgsrc.SrcDb (SrcDb, createSrcDb)
 import Distribution.Parsec (explicitEitherParsec)
@@ -119,8 +120,9 @@ data InitOptions
 
 data UpdateOptions
   = UpdateOptions
-    { optForce      :: !Bool
-    , optPackageURI :: !(Maybe URI)
+    { optForce       :: !Bool
+    , optMarkerStyle :: !MarkerStyle
+    , optPackageURI  :: !(Maybe URI)
     }
   deriving (Show)
 
@@ -204,7 +206,7 @@ optionsP noColor =
         OA.help ("Use colours on output. WHEN can be \"never\", \"always\", or " <>
                  "\"auto\", where \"auto\" enables colours only when the stderr " <>
                  "is a terminal") <>
-        OA.completeWith ["never", "always", "auto"] <>
+        OA.completeWith completeColourPref <>
         OA.value (defaultColourPref noColor) <>
         OA.showDefault <>
         OA.metavar "WHEN"
@@ -266,6 +268,9 @@ colourPref = OA.eitherReader f
     f "auto"   = Right Auto
     f _        = Left "the value must be \"always\", \"never\", or \"auto\""
 
+completeColourPref :: [String]
+completeColourPref = ["never", "always", "auto"]
+
 defaultColourPref :: Bool -> ColourPref
 defaultColourPref noColor
   | noColor   = Never
@@ -325,12 +330,23 @@ commandP =
 
     updateP :: Parser Command
     updateP =
-      (Update .) . UpdateOptions
+      ((Update .) .) . UpdateOptions
       <$> OA.switch
           ( OA.long "force" <>
             OA.short 'f' <>
             OA.help ( "Update the package forcefully even if the requested" <>
                       " version is not a preferred one" )
+          )
+      <*> OA.option markerStyle
+          ( OA.long "merge" <>
+            OA.short 'm' <>
+            OA.help ( "3-way merge style: \"rcs\" for RCS merge(1), or" <>
+                      " \"diff3\" for GNU diff3(1)"
+                    ) <>
+            OA.completeWith completeMarkerStyle <>
+            OA.value RCS <>
+            OA.showDefaultWith showMarkerStyle <>
+            OA.metavar "STYLE"
           )
       <*> optional
           ( OA.argument uriReference
@@ -342,6 +358,21 @@ commandP =
               OA.metavar "PACKAGE-URI"
             )
           )
+
+markerStyle :: ReadM MarkerStyle
+markerStyle = OA.eitherReader f
+  where
+    f :: String -> Either String MarkerStyle
+    f "rcs"   = Right RCS
+    f "diff3" = Right Diff3
+    f _       = Left "the value must be \"rcs\" or \"diff3\""
+
+completeMarkerStyle :: [String]
+completeMarkerStyle = ["rcs", "diff3"]
+
+showMarkerStyle :: MarkerStyle -> String
+showMarkerStyle RCS   = "rcs"
+showMarkerStyle Diff3 = "diff3"
 
 -- https://no-color.org/
 -- FIXME: Document this env var

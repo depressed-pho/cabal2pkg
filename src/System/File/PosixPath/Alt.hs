@@ -2,7 +2,8 @@
 -- package. All of these operations are performed atomically unless
 -- specified otherwise.
 module System.File.PosixPath.Alt
-  ( touchFile
+  ( readFile
+  , touchFile
   , writeFile
   , writeFreshFile
   , withFile
@@ -10,8 +11,9 @@ module System.File.PosixPath.Alt
 
 import Control.Exception.Safe (MonadMask, bracket)
 import Control.Monad.IO.Unlift (MonadIO, liftIO)
-import Data.ByteString.Lazy qualified as Lazy
-import Prelude hiding (writeFile)
+import Data.ByteString qualified as BS
+import Data.ByteString.Lazy qualified as LBS
+import Prelude hiding (readFile, writeFile)
 import System.IO (Handle, hClose)
 import System.OsPath.Posix (PosixPath)
 import System.Posix.IO.PosixString
@@ -27,10 +29,17 @@ touchFile fp = withFile fp WriteOnly flags (const . pure $ ())
             { creat = Just 0o666
             }
 
--- |Write a lazy 'ByteString' to a file. Existing files will be
+-- |Read an entire file as a 'LBS.ByteString'.
+readFile :: (MonadIO m, MonadMask m) => PosixPath -> m LBS.ByteString
+readFile fp = withFile fp ReadOnly flags ((LBS.fromStrict <$>) . liftIO . BS.hGetContents)
+  where
+    flags :: OpenFileFlags
+    flags = defaultFileFlags
+
+-- |Write a 'LBS.ByteString' to a file. Existing files will be
 -- overwritten.
-writeFile :: (MonadIO m, MonadMask m) => PosixPath -> Lazy.ByteString -> m ()
-writeFile fp bs = withFile fp WriteOnly flags (liftIO . flip Lazy.hPut bs)
+writeFile :: (MonadIO m, MonadMask m) => PosixPath -> LBS.ByteString -> m ()
+writeFile fp bs = withFile fp WriteOnly flags (liftIO . flip LBS.hPut bs)
   where
     flags :: OpenFileFlags
     flags = defaultFileFlags
@@ -38,11 +47,11 @@ writeFile fp bs = withFile fp WriteOnly flags (liftIO . flip Lazy.hPut bs)
             , creat = Just 0o666
             }
 
--- |Write a lazy 'ByteString' to a file, but only when the file doesn't
+-- |Write a 'LBS.ByteString' to a file, but only when the file doesn't
 -- already exist. If it exists the action raises an 'IOError' with
 -- 'System.IO.Error.isAlreadyExistsError' returning 'True'.
-writeFreshFile :: (MonadIO m, MonadMask m) => PosixPath -> Lazy.ByteString -> m ()
-writeFreshFile fp bs = withFile fp WriteOnly flags (liftIO . flip Lazy.hPut bs)
+writeFreshFile :: (MonadIO m, MonadMask m) => PosixPath -> LBS.ByteString -> m ()
+writeFreshFile fp bs = withFile fp WriteOnly flags (liftIO . flip LBS.hPut bs)
   where
     flags :: OpenFileFlags
     flags = defaultFileFlags

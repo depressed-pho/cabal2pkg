@@ -6,10 +6,14 @@ module Cabal2Pkg.Command.Update
   ) where
 
 import Cabal2Pkg.CmdLine
-  ( CLI, UpdateOptions(..), FlagMap, fatal, info, warn, pkgPath, srcDb
-  , withPkgFlagsHidden, withPkgFlagsModified, runMake )
+  ( CLI, UpdateOptions(..), FlagMap, debug, fatal, info, warn, pkgPath, srcDb
+  , canonPkgDir, origPkgDir, withPkgFlagsHidden, withPkgFlagsModified, runMake
+  )
 import Cabal2Pkg.Command.Common (command, option, fetchMeta)
-import Cabal2Pkg.Extractor (PackageMeta(distVersion))
+import Cabal2Pkg.Extractor (PackageMeta(distBase, distVersion))
+import Cabal2Pkg.Generator.Buildlink3 (genBuildlink3)
+import Cabal2Pkg.Generator.Description (genDESCR)
+import Cabal2Pkg.Generator.Makefile (genMakefile)
 import Cabal2Pkg.Hackage qualified as Hackage
 import Cabal2Pkg.PackageURI (PackageURI(..), isFromHackage, parsePackageURI)
 import Cabal2Pkg.Pretty (Quoted(..), prettyAnsi)
@@ -21,17 +25,23 @@ import Data.Map.Strict qualified as M
 import Data.Maybe (isJust)
 import Data.Text (Text)
 import Data.Text qualified as T
+import Data.Text.Lazy qualified as TL
+import Data.Text.Lazy.Encoding qualified as TL
+import Data.Text.Lazy.Merge (merge)
 import Database.Pkgsrc.SrcDb qualified as SrcDb
 import Distribution.Parsec (eitherParsec, explicitEitherParsec)
+import Distribution.Pretty (prettyShow)
 import Distribution.Types.Flag qualified as C
 import Distribution.Types.PackageId (PackageIdentifier(pkgName, pkgVersion))
 import Distribution.Types.Version (Version)
 import GHC.Stack (HasCallStack)
 import Lens.Micro ((&), (%~))
 import Network.URI.Lens (uriPathLens)
-import Prettyprinter (Doc)
+import Prelude hiding (readFile)
+import Prettyprinter ((<+>), Doc)
 import Prettyprinter qualified as PP
 import Prettyprinter.Render.Terminal (AnsiStyle)
+import System.File.PosixPath.Alt (readFile)
 import System.OsPath.Posix ((</>), PosixPath, pstr)
 import System.OsPath.Posix qualified as OP
 
@@ -229,7 +239,7 @@ examineNewMeta :: HasCallStack
                -> PackageIdentifier
                -> PackageURI
                -> CLI ()
-examineNewMeta (UpdateOptions {..}) pkg pkgId pkgURI =
+examineNewMeta opts@(UpdateOptions {..}) pkg pkgId pkgURI =
   do path     <- pkgPath
      oldFlags <- packageFlags pkg
      -- This is new metadata. Package flags on the command line should be
@@ -237,7 +247,7 @@ examineNewMeta (UpdateOptions {..}) pkg pkgId pkgURI =
      -- higher precedence over the latter.
      newMeta  <- withPkgFlagsModified (<> oldFlags)
                  $ fetchMeta pkgURI
-     let cont = examineOldMeta pkg oldFlags newMeta
+     let cont = examineOldMeta opts pkg oldFlags newMeta
      case pkgURI of
        Hackage _ _ -> cont
        _ ->
@@ -261,11 +271,12 @@ examineNewMeta (UpdateOptions {..}) pkg pkgId pkgURI =
 -- one that is soon going to be useless. A single .cabal file is almost
 -- always smaller than the entire tarball even if it's uncompressed so...
 examineOldMeta :: HasCallStack
-               => SrcDb.Package CLI
+               => UpdateOptions
+               -> SrcDb.Package CLI
                -> FlagMap
                -> PackageMeta
                -> CLI ()
-examineOldMeta pkg oldFlags newMeta =
+examineOldMeta opts pkg oldFlags newMeta =
   do path    <- pkgPath
      isGit   <- (isJust .) . (<|>)
                 <$> SrcDb.githubProject pkg
@@ -286,7 +297,7 @@ examineOldMeta pkg oldFlags newMeta =
                 fatal $ PP.hsep [ prettyAnsi path
                                 , "has no MASTER_SITES."
                                 , command mempty
-                                , "does not know how to update this package."
+                                , "cannot figure out how to update this package."
                                 ]
               (m:_) ->
                 do distName  <- OP.decodeUtf =<< SrcDb.distName pkg
@@ -296,7 +307,7 @@ examineOldMeta pkg oldFlags newMeta =
                    if isFromHackage oldPkgURI
                      then fetchMeta oldPkgURI
                      else fetchDistFile
-     applyChanges oldMeta newMeta
+     applyChanges opts pkg oldMeta newMeta
   where
     fetchDistFile :: CLI PackageMeta
     fetchDistFile =
@@ -312,11 +323,47 @@ examineOldMeta pkg oldFlags newMeta =
 -- |This is a continuation of 'examineOldMeta'. Perform a 3-way merge based
 -- on the current set of files and the old and new package metadata.
 applyChanges :: HasCallStack
-             => PackageMeta
+             => UpdateOptions
+             -> SrcDb.Package CLI
+             -> PackageMeta
              -> PackageMeta
              -> CLI ()
-applyChanges oldMeta newMeta =
-  error "FIXME: not impl"
+applyChanges (UpdateOptions {..}) pkg oldMeta newMeta =
+  do labelCur <- do distName <- (T.pack <$>) . OP.decodeUtf =<< SrcDb.distName pkg
+                    pure $ distName <> " (current)"
+     let labelBase = mconcat [ distBase oldMeta
+                             , "-"
+                             , T.pack . prettyShow . distVersion $ oldMeta
+                             , " (merge base)"
+                             ]
+         labelNew  = mconcat [ distBase newMeta
+                             , "-"
+                             , T.pack . prettyShow . distVersion $ newMeta
+                             , " (new)"
+                             ]
+
+     let descrBase = genDESCR oldMeta
+         descrNew  = genDESCR newMeta
+     descrCur <- readFile' [pstr|DESCR|]
+     let descrMerged = merge optMarkerStyle
+                             (labelCur , descrCur )
+                             (labelBase, descrBase)
+                             (labelNew , descrNew )
+     if descrMerged == descrCur
+       then info $ prettyAnsi [pstr|DESCR|] <+> "is left unchanged"
+       else debug $ "Merged DESCR:\n" <> PP.pretty (TL.strip descrMerged)
+
+readFile' :: PosixPath -> CLI TL.Text
+readFile' name =
+  do cfp <- (</> name) <$> canonPkgDir
+     ofp <- (</> name) <$> origPkgDir
+     lbs <- readFile cfp
+     case TL.decodeUtf8' lbs of
+       Right txt -> pure txt
+       Left  e   -> fatal $ PP.hsep [ "Cannot read"
+                                    , prettyAnsi ofp <> PP.pretty ':'
+                                    , PP.viaShow e
+                                    ]
 
 -- |Reinterpret DISTNAME as a Cabal package identifier. This is guaranteed
 -- to be a valid interpretation as long as the package Makefile includes
