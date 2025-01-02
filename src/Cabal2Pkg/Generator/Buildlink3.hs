@@ -90,7 +90,7 @@ genAST pm =
         abiDepends = var .+= [pat]
           where
             var = AST.Variable $ "BUILDLINK_ABI_DEPENDS." <> pkgBase pm
-            pat = pkgBase pm <> "-" <> T.pack (prettyShow $ distVersion pm) <> "{,nb*}"
+            pat = pkgBase pm <> ">=" <> T.pack (prettyShow $ distVersion pm)
 
         pkgsrcDir :: Block
         pkgsrcDir = var .?= [dir]

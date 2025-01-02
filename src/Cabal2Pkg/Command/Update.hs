@@ -467,8 +467,7 @@ stripMakefileRev = TL.unlines . filter p . TL.lines
       | otherwise                           = True
 
 -- |Strip PKGREVISION from a buildlink3.mk, because it should be reset
--- whenever a package is updated. Also replace ">=" in
--- BUILDLINK_ABI_DEPENDS with "-" because the latter is a better choice.
+-- whenever a package is updated.
 stripBl3Rev :: TL.Text -> TL.Text
 stripBl3Rev = TL.unlines . (go <$>) . TL.lines
   where
@@ -476,22 +475,13 @@ stripBl3Rev = TL.unlines . (go <$>) . TL.lines
     go line
       | "BUILDLINK_ABI_DEPENDS." `TL.isPrefixOf` line =
           -- Split the line with "nb" as a delimiter. If the last piece
-          -- consist only of digits, then it's clearly the revision we want
-          -- to remove.
+          -- consists only of digits, then it's clearly the revision we
+          -- want to remove.
           case L.unsnoc (TL.splitOn "nb" line) of
             Just (xs, x)
-              | TL.all isDigit x -> fixCmp $ TL.intercalate "nb" xs
-            _ -> fixCmp line
+              | TL.all isDigit x -> TL.intercalate "nb" xs
+            _ -> line
       | otherwise = line
-
-    fixCmp :: TL.Text -> TL.Text
-    fixCmp txt =
-      let txt' = TL.replace ">=" "-" txt
-      in
-        if "{,nb*}" `TL.isSuffixOf` txt' then
-          txt'
-        else
-          txt' <> "{,nb*}"
 
 readFile' :: PosixPath -> CLI TL.Text
 readFile' name =
