@@ -79,6 +79,7 @@ executable cabal2pkg
       , exceptions           ^>= 0.10.7
       , filepath              >= 1.4
       , ghc-paths            ^>= 0.1
+      , haddock-library      ^>= 1.11.0
       , http-conduit         ^>= 2.3.8
       , http-media           ^>= 0.8.1
       , http-types           ^>= 0.12.4
@@ -104,7 +105,6 @@ executable cabal2pkg
       , unliftio             ^>= 0.2.25
       , unliftio-core        ^>= 0.2.1
       , unordered-containers ^>= 0.2.20
-      , word-wrap            ^>= 0.5
 
     if flag(rtsopts)
         ghc-options: -rtsopts

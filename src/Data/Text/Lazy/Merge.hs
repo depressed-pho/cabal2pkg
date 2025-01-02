@@ -1,4 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
 -- |A high-level interface to the @diff3@ package.
 module Data.Text.Lazy.Merge
   ( -- * Performing 3-way merge
