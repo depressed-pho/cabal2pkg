@@ -4,8 +4,8 @@ version:            0.1.0.0
 synopsis:           A tool to automate importing Cabal packages to pkgsrc
 -- description:
 homepage:           https://github.com/depressed-pho/cabal2pkg
-license:            CC0-1.0
-license-file:       LICENSE
+license:            Unlicense
+license-file:       UNLICENSE
 author:             PHO
 maintainer:         pho@cielonegro.org
 -- copyright:
