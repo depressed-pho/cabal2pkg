@@ -1,8 +1,12 @@
+{-# LANGUAGE OverloadedStrings #-}
 -- |A high-level interface to the @diff3@ package.
 module Data.Text.Lazy.Merge
   ( -- * Performing 3-way merge
     MarkerStyle(..)
   , merge
+
+    -- * Checking if a file contains conflict markers
+  , hasMarkers
 
     -- * Low-level utility
   , linesWithLF
@@ -81,6 +85,10 @@ merge ms (labelA, fileA) (labelBase, fileBase) (labelB, fileB) =
                                ]
       where
         m = stimes (7 :: Int) (TLB.singleton c)
+
+-- |Check if a file contains conflict markers.
+hasMarkers :: TL.Text -> Bool
+hasMarkers = any ("<<<<<<< " `TL.isPrefixOf`) . TL.lines
 
 -- |This is similar to 'TL.lines' but resulting lines contain newlines,
 -- except that the last line may not have a newline. The inverse of this

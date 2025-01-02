@@ -68,15 +68,15 @@ genAST pm
              -- hs-${DISTNAME:tl} but it's too late. Changing it at this
              -- point would cause a major breakage. So we need to
              -- explicitly define it here whenever pkgBase isn't equal to
-             -- hs-${DISTNAME}.
-             <> if pkgBase pm == "hs-" <> distName then
-                  mempty
-                else
-                  [ "PKGNAME" .= pure (if pkgBase pm == distName then
-                                         "${DISTNAME}"
-                                       else
-                                         "${DISTNAME:tl}")
-                  ]
+             -- hs-{distBase}.
+             <> (if pkgBase pm == "hs-" <> distBase pm then
+                   mempty
+                 else
+                   [ "PKGNAME" .= pure (if pkgBase pm == distBase pm then
+                                          "${DISTNAME}"
+                                        else
+                                          "${DISTNAME:tl}")
+                   ])
              <> [ "CATEGORIES" .= categories pm ]
                 -- FIXME: Consider the cases where it's GitHub or GitLab.
              <> case masterSites pm of

@@ -574,10 +574,10 @@ instance Pretty FoldedAssignment where
   pretty _ (FoldedAssignment (Assignment {..}))
     = mconcat [ pretty () aVar
               , pretty () aType
-              , tab
               , if null aTokens && isNothing aComment
-                then "# empty"
-                else mconcat [ PP.backslash
+                then PP.line
+                else mconcat [ tab
+                             , PP.backslash
                              , PP.line
                              , go aTokens
                              , pprOptionalComment aComment

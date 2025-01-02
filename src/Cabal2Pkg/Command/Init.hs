@@ -8,9 +8,9 @@ module Cabal2Pkg.Command.Init
 import Cabal2Pkg.CmdLine
   ( CLI, InitOptions(..), debug, fatal, info, canonPkgDir, origPkgDir
   , makeCmd, pkgBase, runMake )
-import Cabal2Pkg.Command.Common (command, option, fetchMeta)
-import Cabal2Pkg.Extractor
-  ( PackageMeta(distBase), hasLibraries, hasExecutables, hasForeignLibs )
+import Cabal2Pkg.Command.Common
+  ( command, option, fetchMeta, shouldHaveBuildlink3, shouldHaveHsPrefix )
+import Cabal2Pkg.Extractor (PackageMeta(distBase))
 import Cabal2Pkg.Generator.Buildlink3 (genBuildlink3)
 import Cabal2Pkg.Generator.Description (genDESCR)
 import Cabal2Pkg.Generator.Makefile (genMakefile)
@@ -229,36 +229,3 @@ validatePkgPath meta
              fatal $ PP.hsep [ expAndAct' <> "."
                              , renameDir
                              ]
-
---
--- If the package only provides Haskell libraries but no executables or
--- foreign libraries,
---   * It should have buildlink3.mk.
---   * PKGNAME should have a prefix "hs-".
---
--- If it only provides executables but nothing else,
---   * It shouldn't have buildlink3.mk.
---   * PKGNAME shouldn't have a prefix "hs-".
---
--- If it only provides foreign libraries but nothing else,
---   * It should have buildlink3.mk
---   * PKGNAME shouldn't have a prefix "hs-".
---
--- In any other cases,
---   * No rules as to whether to have buildlink3.mk. We generate one
---     anyway, and let the user decide if they want to keep it.
---   * No rules as to whether to have a prefix "hs-".
---
-shouldHaveBuildlink3 :: PackageMeta -> Maybe Bool
-shouldHaveBuildlink3 meta
-  | hasLibraries meta && not (hasExecutables meta) && not (hasForeignLibs meta) = Just True
-  | not (hasLibraries meta) && hasExecutables meta && not (hasForeignLibs meta) = Just False
-  | not (hasLibraries meta) && not (hasExecutables meta) && hasForeignLibs meta = Just True
-  | otherwise = Nothing
-
-shouldHaveHsPrefix :: PackageMeta -> Maybe Bool
-shouldHaveHsPrefix meta
-  | hasLibraries meta && not (hasExecutables meta) && not (hasForeignLibs meta) = Just True
-  | not (hasLibraries meta) && hasExecutables meta && not (hasForeignLibs meta) = Just False
-  | not (hasLibraries meta) && not (hasExecutables meta) && hasForeignLibs meta = Just False
-  | otherwise = Nothing

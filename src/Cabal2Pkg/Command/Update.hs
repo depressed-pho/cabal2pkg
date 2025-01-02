@@ -7,9 +7,10 @@ module Cabal2Pkg.Command.Update
 
 import Cabal2Pkg.CmdLine
   ( CLI, UpdateOptions(..), FlagMap, debug, fatal, info, warn, pkgPath, srcDb
-  , canonPkgDir, origPkgDir, withPkgFlagsHidden, withPkgFlagsModified, runMake
-  )
-import Cabal2Pkg.Command.Common (command, option, fetchMeta)
+  , canonPkgDir, origPkgDir, makeCmd, withPkgFlagsHidden, withPkgFlagsModified
+  , runMake )
+import Cabal2Pkg.Command.Common
+  ( command, option, fetchMeta, shouldHaveBuildlink3 )
 import Cabal2Pkg.Extractor (PackageMeta(distBase, distVersion))
 import Cabal2Pkg.Generator.Buildlink3 (genBuildlink3)
 import Cabal2Pkg.Generator.Description (genDESCR)
@@ -18,16 +19,18 @@ import Cabal2Pkg.Hackage qualified as Hackage
 import Cabal2Pkg.PackageURI (PackageURI(..), isFromHackage, parsePackageURI)
 import Cabal2Pkg.Pretty (Quoted(..), prettyAnsi)
 import Control.Applicative ((<|>))
-import Control.Exception.Safe (MonadThrow, assert)
-import Control.Monad (unless)
+import Control.Exception.Safe (MonadThrow, assert, catch, throw)
+import Control.Monad (unless, when)
 import Control.Monad.IO.Unlift (MonadUnliftIO)
+import Data.Char (isDigit)
+import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe (isJust)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
 import Data.Text.Lazy.Encoding qualified as TL
-import Data.Text.Lazy.Merge (merge)
+import Data.Text.Lazy.Merge (hasMarkers, merge)
 import Database.Pkgsrc.SrcDb qualified as SrcDb
 import Distribution.Parsec (eitherParsec, explicitEitherParsec)
 import Distribution.Pretty (prettyShow)
@@ -41,15 +44,20 @@ import Prelude hiding (readFile)
 import Prettyprinter ((<+>), Doc)
 import Prettyprinter qualified as PP
 import Prettyprinter.Render.Terminal (AnsiStyle)
-import System.File.PosixPath.Alt (readFile)
-import System.OsPath.Posix ((</>), PosixPath, pstr)
+import System.Directory.PosixPath (removePathForcibly, renameFile)
+import System.File.PosixPath.Alt (readFile, writeFreshFile)
+import System.IO.Error (isDoesNotExistError)
+import System.OsPath.Posix ((</>), PosixPath, PosixString, pstr)
 import System.OsPath.Posix qualified as OP
 
 run :: HasCallStack => UpdateOptions -> CLI ()
 run opts@(UpdateOptions {..}) =
   do -- Before doing anything expensive, see if files have conflict
      -- markers. Abort if there are any.
-     -- FIXME: do it
+     mapM_ checkConflicts [ [pstr|DESCR|]
+                          , [pstr|Makefile|]
+                          , [pstr|buildlink3.mk|]
+                          ]
 
      -- Look the package up in the source database. We need to know things
      -- like its current version.
@@ -111,6 +119,18 @@ run opts@(UpdateOptions {..}) =
                          | otherwise -> deprDowngradeRejected path ver pkgId
                   Nothing ->
                     unavailable path ver
+
+checkConflicts :: HasCallStack => PosixPath -> CLI ()
+checkConflicts name =
+  ( do file <- readFile' name
+       when (hasMarkers file) . fatal $
+         PP.hsep [ prettyAnsi name
+                 , "appears to have conflict markers."
+                 , "Please resolve conflicts before updating the package."
+                 ]
+  ) `catch` \(e :: IOError) ->
+              unless (isDoesNotExistError e) $
+                throw e
 
 alreadyLatest :: HasCallStack => PosixPath -> PackageIdentifier -> CLI ()
 alreadyLatest path pkgId =
@@ -341,17 +361,137 @@ applyChanges (UpdateOptions {..}) pkg oldMeta newMeta =
                              , T.pack . prettyShow . distVersion $ newMeta
                              , " (new)"
                              ]
+     let update :: PosixPath -> (PackageMeta -> TL.Text) -> (TL.Text -> TL.Text) -> CLI ()
+         update name gen preprocess =
+           do let base = gen oldMeta
+                  new  = gen newMeta
+              cur <- preprocess <$> readFile' name
+              let merged = merge optMarkerStyle
+                                 (labelCur , cur )
+                                 (labelBase, base)
+                                 (labelNew , new )
+              if merged == cur
+                then info $ prettyAnsi name <+> "needs no changes"
+                else do name' <- OP.decodeUtf name
+                        debug $ mconcat [ "Merged" <+> PP.pretty name'
+                                        , ":\n"
+                                        , PP.pretty (TL.strip merged)
+                                        ]
+                        -- Rename the existing file before writing the
+                        -- merged one. We will delete old files but we do
+                        -- it at the very end.
+                        renameFile' name (name <> backupSuffix)
+                        writeFreshFile' name merged
+                        -- Warn if it has conflicts.
+                        when (hasMarkers merged) . warn $
+                          PP.hsep [ prettyAnsi name
+                                  , "has merge conflicts."
+                                  , "Please don't forget to resolve them."
+                                  ]
 
-     let descrBase = genDESCR oldMeta
-         descrNew  = genDESCR newMeta
-     descrCur <- readFile' [pstr|DESCR|]
-     let descrMerged = merge optMarkerStyle
-                             (labelCur , descrCur )
-                             (labelBase, descrBase)
-                             (labelNew , descrNew )
-     if descrMerged == descrCur
-       then info $ prettyAnsi [pstr|DESCR|] <+> "is left unchanged"
-       else debug $ "Merged DESCR:\n" <> PP.pretty (TL.strip descrMerged)
+     -- These files are generated from the package description, and they
+     -- should always exist.
+     update [pstr|DESCR|]    genDESCR    id
+     update [pstr|Makefile|] genMakefile stripMakefileRev
+
+     -- buildlink3.mk is a tricky one.
+     let bl3 = [pstr|buildlink3.mk|]
+     case shouldHaveBuildlink3 newMeta of
+       Just False ->
+         -- The updated package shouldn't have buildlink3.mk. If the
+         -- package currently has one, we should even delete it.
+         deleteFile' True bl3
+
+       Just True ->
+         -- The updated package should have buildlink3.mk. If the package
+         -- currently doesn't have one, create it as if this were the
+         -- "init" command.
+         update bl3 genBuildlink3 stripBl3Rev
+         `catch` \(e :: IOError) ->
+                   if isDoesNotExistError e then
+                     writeFreshFile' bl3 (genBuildlink3 newMeta)
+                   else
+                     throw e
+
+       Nothing ->
+         -- The updated package may have buildlink3.mk but it doesn't have
+         -- to. If the package currently has one, update it like any other
+         -- files. Otherwise leave it non-existent.
+         update bl3 genBuildlink3 stripBl3Rev
+         `catch` \(e :: IOError) ->
+                   unless (isDoesNotExistError e) $
+                     throw e
+
+     -- PLIST cannot be directly generated from the package description. We
+     -- have no choice but to leave it unchanged.
+
+     -- Now that we updated all the files, we can delete backup now.
+     mapM_ deleteBackup [ [pstr|DESCR|]
+                        , [pstr|Makefile|]
+                        , [pstr|buildlink3.mk|]
+                        ]
+
+     -- distinfo needs to be updated too, but the only way to do it is to
+     -- run make(1). This means we can only do it if there are no conflicts
+     -- in Makefile.
+     mk <- readFile' [pstr|Makefile|]
+     if hasMarkers mk
+       then do make <- T.pack <$> (OP.decodeUtf . OP.takeFileName =<< makeCmd)
+               warn $ PP.hsep [ command mempty
+                              , "cannot update"
+                              , prettyAnsi [pstr|distinfo|]
+                              , "because there are unresolved conflicts in"
+                              , prettyAnsi [pstr|Makefile|] <> PP.dot
+                              , "Be sure to run"
+                              , prettyAnsi (Quoted (PP.pretty make <+> "distinfo"))
+                              , "after resolving them."
+                              ]
+       else do info "Updating distinfo..."
+               runMake ["distinfo"]
+
+backupSuffix :: PosixString
+backupSuffix = [pstr|.cabal2pkg.sav|]
+
+deleteBackup :: PosixPath -> CLI ()
+deleteBackup name =
+  deleteFile' False (name <> backupSuffix)
+
+-- |Strip PKGREVISION from a Makefile, because it should be reset whenever
+-- a package is updated.
+stripMakefileRev :: TL.Text -> TL.Text
+stripMakefileRev = TL.unlines . filter p . TL.lines
+  where
+    p :: TL.Text -> Bool
+    p line
+      | "PKGREVISION=" `TL.isPrefixOf` line = False
+      | otherwise                           = True
+
+-- |Strip PKGREVISION from a buildlink3.mk, because it should be reset
+-- whenever a package is updated. Also replace ">=" in
+-- BUILDLINK_ABI_DEPENDS with "-" because the latter is a better choice.
+stripBl3Rev :: TL.Text -> TL.Text
+stripBl3Rev = TL.unlines . (go <$>) . TL.lines
+  where
+    go :: TL.Text -> TL.Text
+    go line
+      | "BUILDLINK_ABI_DEPENDS." `TL.isPrefixOf` line =
+          -- Split the line with "nb" as a delimiter. If the last piece
+          -- consist only of digits, then it's clearly the revision we want
+          -- to remove.
+          case L.unsnoc (TL.splitOn "nb" line) of
+            Just (xs, x)
+              | TL.all isDigit x -> fixCmp $ TL.intercalate "nb" xs
+            _ -> fixCmp line
+      | otherwise = line
+
+    fixCmp :: TL.Text -> TL.Text
+    fixCmp txt =
+      let txt' = TL.replace ">=" "-" txt
+      in
+        if "{,nb*}" `TL.isSuffixOf` txt' then
+          txt'
+        else
+          txt' <> "{,nb*}"
 
 readFile' :: PosixPath -> CLI TL.Text
 readFile' name =
@@ -364,6 +504,26 @@ readFile' name =
                                     , prettyAnsi ofp <> PP.pretty ':'
                                     , PP.viaShow e
                                     ]
+
+renameFile' :: PosixPath -> PosixPath -> CLI ()
+renameFile' from to =
+  do cfpFrom <- (</> from) <$> canonPkgDir
+     cfpTo   <- (</> to  ) <$> canonPkgDir
+     renameFile cfpFrom cfpTo
+
+writeFreshFile' :: PosixPath -> TL.Text -> CLI ()
+writeFreshFile' name txt =
+  do cfp <- (</> name) <$> canonPkgDir
+     ofp <- (</> name) <$> origPkgDir
+     writeFreshFile cfp (TL.encodeUtf8 txt)
+     info $ "Wrote " <> prettyAnsi ofp
+
+deleteFile' :: Bool -> PosixPath -> CLI ()
+deleteFile' showMsg name =
+  do cfp <- (</> name) <$> canonPkgDir
+     ofp <- (</> name) <$> origPkgDir
+     removePathForcibly cfp
+     when showMsg . info $ "Deleted " <> prettyAnsi ofp
 
 -- |Reinterpret DISTNAME as a Cabal package identifier. This is guaranteed
 -- to be a valid interpretation as long as the package Makefile includes
