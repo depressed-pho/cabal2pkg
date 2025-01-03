@@ -2,8 +2,6 @@
 module Cabal2Pkg.Extractor
   ( PackageMeta(..)
   , summariseCabal
-  , omitHackageDefaults
-  , fillInMasterSites
   , hasLibraries
   , hasForeignLibs
   , hasExecutables
@@ -14,7 +12,7 @@ import Cabal2Pkg.CmdLine qualified as CLI
 import Cabal2Pkg.Extractor.Component
   ( ComponentMeta(..), ComponentType(..), cType, extractComponents )
 import Cabal2Pkg.Extractor.License (extractLicense)
-import Cabal2Pkg.PackageURI (PackageURI(HTTP))
+import Cabal2Pkg.Site (PackageURI)
 import Data.Data (Data)
 import Data.Maybe (fromMaybe)
 import Data.Set (Set)
@@ -25,27 +23,23 @@ import Distribution.Types.GenericPackageDescription qualified as GPD
 import Distribution.Types.PackageDescription (PackageDescription)
 import Distribution.Types.PackageDescription qualified as PD
 import Distribution.Types.PackageId qualified as C
-import Distribution.Types.PackageName qualified as C
+import Distribution.Types.PackageName (PackageName)
 import Distribution.Types.Version (Version)
 import Distribution.Utils.ShortText qualified as ST
-import GHC.Stack (HasCallStack)
 import Lens.Micro ((^.))
-import Network.URI (URI(uriPath), uriToString)
-import System.FilePath.Posix qualified as FP
 import System.OsPath.Posix qualified as OP
 
 
 data PackageMeta = PackageMeta
-  { distBase    :: !Text
+  { distBase    :: !PackageName
   , distVersion :: !Version
   , pkgBase     :: !Text
   , pkgPath     :: !Text
   , categories  :: ![Text]
-    -- ^@[]@ means it's in Hackage
-  , masterSites :: ![Text]
+    -- ^Basically represents @MASTER_SITES@
+  , origin      :: !PackageURI
   , maintainer  :: !Text
-    -- ^@Nothing@ means it's in Hackage
-  , homepage    :: !(Maybe Text)
+  , homepage    :: !Text
   , comment     :: !Text
   , description :: !Text
   , license     :: !Text
@@ -58,8 +52,8 @@ data PackageMeta = PackageMeta
 -- |Construct a 'PackageMeta' from a given package description. This
 -- function does not take account of the current state of the PKGPATH, that
 -- is, it doesn't read its @Makefile@ even if it exists.
-summariseCabal :: GenericPackageDescription -> CLI PackageMeta
-summariseCabal gpd
+summariseCabal :: PackageURI -> GenericPackageDescription -> CLI PackageMeta
+summariseCabal pkgURI gpd
   = do path     <- (T.pack <$>) . OP.decodeUtf =<< CLI.pkgPath
        base     <- (T.pack <$>) . OP.decodeUtf =<< CLI.pkgBase
        cat      <- (T.pack <$>) . OP.decodeUtf =<< CLI.pkgCategory
@@ -67,14 +61,14 @@ summariseCabal gpd
        fs       <- CLI.pkgFlags
        (cs, ts) <- extractComponents gpd
        pure PackageMeta
-         { distBase    = T.pack . C.unPackageName . C.pkgName . PD.package $ pd
+         { distBase    = C.pkgName . PD.package $ pd
          , distVersion = C.pkgVersion . PD.package $ pd
          , pkgBase     = base
          , pkgPath     = path
          , categories  = [cat]
-         , masterSites = []
+         , origin      = pkgURI
          , maintainer  = fromMaybe "pkgsrc-users@NetBSD.org" mtr
-         , homepage    = Just . T.pack . ST.fromShortText . PD.homepage $ pd
+         , homepage    = T.pack . ST.fromShortText . PD.homepage $ pd
          , comment     = T.pack . ST.fromShortText . PD.synopsis $ pd
          , description = extractDescription pd
          , license     = extractLicense pd
@@ -101,23 +95,6 @@ extractDescription pd =
         T.pack . ST.fromShortText $ synop
     else
       T.pack . ST.fromShortText $ descr
-
-omitHackageDefaults :: PackageMeta -> PackageMeta
-omitHackageDefaults pm =
-  pm { masterSites = []
-     , homepage    = Nothing
-     }
-
-fillInMasterSites :: HasCallStack => PackageURI -> PackageMeta -> PackageMeta
-fillInMasterSites uri pm =
-  case uri of
-    HTTP httpURI ->
-      let path' = FP.dropFileName . uriPath $ httpURI
-          uri'  = httpURI { uriPath = path' }
-      in
-        pm { masterSites = pure . T.pack $ uriToString id uri' "" }
-    _ ->
-      error ("Cannot fill in MASTER_SITES for URI: " <> show uri)
 
 hasLibraries :: PackageMeta -> Bool
 hasLibraries

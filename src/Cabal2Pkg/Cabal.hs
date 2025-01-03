@@ -5,12 +5,15 @@ module Cabal2Pkg.Cabal
   ( readCabal
   ) where
 
-import Cabal2Pkg.Hackage qualified as Hackage
-import Cabal2Pkg.PackageURI (PackageURI(..))
 import Cabal2Pkg.Pretty (prettyAnsi)
+import Cabal2Pkg.Site (PackageURI(..))
+import Cabal2Pkg.Site.GitHub (renderGitHubDist)
+import Cabal2Pkg.Site.GitLab (renderGitLabDist)
+import Cabal2Pkg.Site.Hackage qualified as Hackage
 import Cabal2Pkg.CmdLine (CLI, fatal, warn)
 import Control.Monad.Catch (MonadThrow)
 import Control.Monad.Primitive (PrimMonad)
+import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Resource (MonadResource)
 import Data.ByteString (ByteString)
 import Data.ByteString.Lazy (toStrict)
@@ -72,9 +75,11 @@ readCabal uri =
 
 fetchCabal :: PackageURI
            -> ConduitT i (PosixPath, ByteString) CLI ()
-fetchCabal (HTTP    uri      ) = fetchHTTP uri
-fetchCabal (File    path     ) = fetchLocal path
-fetchCabal (Hackage name mVer) = Hackage.fetchCabal name mVer
+fetchCabal (HTTP    uri ) = fetchHTTP uri
+fetchCabal (File    path) = fetchLocal path
+fetchCabal (GitHub  dist) = fetchHTTP =<< lift (renderGitHubDist dist)
+fetchCabal (GitLab  dist) = fetchHTTP =<< lift (renderGitLabDist dist)
+fetchCabal (Hackage dist) = Hackage.fetchCabal dist
 
 fetchLocal :: (MonadResource m, MonadThrow m, PrimMonad m)
            => FilePath

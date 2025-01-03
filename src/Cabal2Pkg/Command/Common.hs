@@ -9,11 +9,10 @@ module Cabal2Pkg.Command.Common
 
 import Cabal2Pkg.Cabal (readCabal)
 import Cabal2Pkg.CmdLine (CLI, debug, info)
-import Cabal2Pkg.PackageURI (PackageURI, isFromHackage, renderPackageURI)
 import Cabal2Pkg.Pretty (prettyAnsi)
+import Cabal2Pkg.Site (PackageURI, renderPackageURI)
 import Cabal2Pkg.Extractor
-  ( PackageMeta, fillInMasterSites, omitHackageDefaults, summariseCabal
-  , hasLibraries, hasExecutables, hasForeignLibs )
+  ( PackageMeta, summariseCabal, hasLibraries, hasExecutables, hasForeignLibs )
 import GHC.Stack (HasCallStack)
 import PackageInfo_cabal2pkg qualified as PI
 import Prettyprinter ((<+>), Doc)
@@ -37,20 +36,18 @@ option = PP.annotate (PP.colorDull PP.Green)
 -- mk/haskell.mk takes care of them.
 fetchMeta :: HasCallStack => PackageURI -> CLI PackageMeta
 fetchMeta uri =
-  do info $ PP.hsep [ "Fetching"
-                    , prettyAnsi (renderPackageURI uri)
+  do uri' <- renderPackageURI uri
+     info $ PP.hsep [ "Fetching"
+                    , prettyAnsi uri'
                     , "and analysing its package description..."
                     ]
+
      cabal <- readCabal uri
      debug $ "Found a package description:\n" <> PP.pretty (ppShow cabal)
 
-     let transMeta = if isFromHackage uri then
-                       omitHackageDefaults
-                     else
-                       fillInMasterSites uri
-     meta <- transMeta <$> summariseCabal cabal
-
+     meta <- summariseCabal uri cabal
      debug $ "Summarised package metadata:\n" <> PP.pretty (ppShow meta)
+
      pure meta
 
 --

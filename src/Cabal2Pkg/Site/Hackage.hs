@@ -1,22 +1,32 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE ViewPatterns #-}
 -- |Hackage recommends API users to use the hackage-security library
 -- instead of directly accessing it. However, hackage-security is designed
 -- to build a clone of the entire database as a local cache and update it
 -- from time to time. That doesn't really suit well to our use case. So we
 -- directly use its REST API.
-module Cabal2Pkg.Hackage
-  ( PackageStatus(..)
+module Cabal2Pkg.Site.Hackage
+  ( -- * URI
+    HackageDist(..)
+  , parseHackageDist
+  , reconstructHackageDist
+  , renderHackageDist
+
+    -- * API
+  , PackageStatus(..)
   , AvailableVersions(..)
   , latestPreferred
 
-    -- * I/O
+    -- ** I/O
   , fetchAvailableVersions
   , fetchCabal
   ) where
 
 import Cabal2Pkg.CmdLine (CLI, info, fatal, hackageURI)
 import Cabal2Pkg.Pretty (prettyAnsi)
+import Cabal2Pkg.Site.Common (isIn)
+import Control.Monad (unless)
 import Control.Monad.Catch (MonadThrow)
 import Control.Monad.Trans.Class (lift)
 import Data.Aeson.Key qualified as K
@@ -28,14 +38,19 @@ import Data.ByteString.Lazy (toStrict)
 import Data.Char (toLower)
 import Data.Conduit ((.|), ConduitT, yield)
 import Data.Conduit.Combinators (sinkLazy)
-import Data.Foldable (find)
+import Data.Data (Data)
+import Data.Foldable (find, toList)
+import Data.List qualified as L
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as M
-import Data.Maybe (fromJust)
+import Data.Maybe (fromJust, listToMaybe)
 import Data.Text qualified as T
 import Data.Text.Encoding (decodeUtf8Lenient)
+import Database.Pkgsrc.SrcDb (Package)
+import Database.Pkgsrc.SrcDb qualified as SrcDb
 import Distribution.Parsec (eitherParsec)
 import Distribution.Pretty (prettyShow)
+import Distribution.Types.PackageId (PackageIdentifier(pkgName, pkgVersion))
 import Distribution.Types.PackageName (PackageName)
 import Distribution.Types.Version (Version)
 import GHC.Stack (HasCallStack)
@@ -46,12 +61,92 @@ import Network.HTTP.Simple
   , httpJSON, httpSource, parseRequest )
 import Network.HTTP.Types
   ( hContentType, statusCode, statusMessage, statusIsSuccessful )
-import Network.URI (URI(..), uriToString)
+import Network.URI (URI(..), pathSegments, uriToString)
 import Network.URI.Lens (uriPathLens)
 import Prettyprinter qualified as PP
 import System.FilePath.Posix qualified as FP
 import System.OsPath.Posix (PosixPath)
 import System.OsPath.Posix qualified as OP
+
+
+data HackageDist = HackageDist !PackageName !(Maybe Version)
+  deriving (Data, Eq, Show)
+
+-- |Try to parse a package URI. Return 'Nothing' If it's not from Hackage.
+parseHackageDist :: Maybe PackageName -- ^Context, used for the @update@ command
+                 -> URI
+                 -> CLI (Maybe HackageDist)
+parseHackageDist ctx uri =
+  case uriScheme uri of
+    "http:"  -> parseHTTPURI uri
+    "https:" -> parseHTTPURI uri
+    ""       -> parseHackageURI ctx uri
+    _        -> pure Nothing
+
+parseHTTPURI :: URI -> CLI (Maybe HackageDist)
+parseHTTPURI uri = go <$> hackageURI
+  where
+    go :: URI -> Maybe HackageDist
+    go hackage =
+      do unless (uri `isIn` hackage) $
+           fail "clearly not a hackage URI"
+         -- The first segment after "package" should be
+         -- "{PACKAGE}-{VERSION}". The second one should be
+         -- "{PACKAGE}-{VERSION}.tar.gz".
+         [s1, s2] <- let nDrop = L.length (pathSegments hackage)
+                         segs  = pathSegments uri
+                     in
+                       pure $ L.drop nDrop segs
+         pkgId    <- listToMaybe . toList $ eitherParsec s1
+         name     <- FP.stripExtension ".tar.gz" s2
+         pkgId'   <- listToMaybe . toList $ eitherParsec name
+         unless (pkgId == pkgId') $
+           fail "package IDs mismatch"
+         pure $ HackageDist (pkgName pkgId) (Just $ pkgVersion pkgId)
+
+parseHackageURI :: MonadThrow m => Maybe PackageName -> URI -> m (Maybe HackageDist)
+parseHackageURI Nothing (uriPath -> path) =
+  case eitherParsec path of
+    Right pkgId ->
+      -- It's a full package ID, i.e. NAME-VERSION
+      pure . Just $ HackageDist (pkgName pkgId) (Just $ pkgVersion pkgId)
+    Left _ ->
+      case eitherParsec path of
+        Right name ->
+          -- It's a package name without version
+          pure . Just $ HackageDist name Nothing
+        Left _ ->
+          pure Nothing
+parseHackageURI (Just name) (uriPath -> path) =
+  case eitherParsec path of
+    Right ver ->
+      -- It's a version
+      pure . Just $ HackageDist name (Just ver)
+    Left _ ->
+      pure Nothing
+
+-- |Try to reconstruct a 'HackageDist' from an existing pkgsrc
+-- package. Return 'Nothing' if it's not from Hackage.
+reconstructHackageDist :: Package CLI -> CLI (Maybe HackageDist)
+reconstructHackageDist pkg =
+  do ms <- SrcDb.masterSites pkg
+     case ms of
+       (m:_) ->
+         do distName <- OP.decodeUtf =<< SrcDb.distName    pkg
+            sufx     <- OP.decodeUtf =<< SrcDb.extractSufx pkg
+            parseHackageDist Nothing $
+              m & uriPathLens %~ \base -> base <> distName <> sufx
+       _ ->
+         pure Nothing
+
+renderHackageDist :: HackageDist -> URI
+renderHackageDist (HackageDist name mVer) =
+  URI { uriScheme    = ""
+      , uriAuthority = Nothing
+      , uriPath      = prettyShow name <> foldMap (("-" <>) . prettyShow) mVer
+      , uriQuery     = ""
+      , uriFragment  = ""
+      }
 
 data PackageStatus =
     -- ^This version is good to use.
@@ -113,10 +208,8 @@ fetchAvailableVersions name =
                   ]
 
 -- |Fetch a .cabal file from the Hackage for a given package.
-fetchCabal :: PackageName
-           -> Maybe Version
-           -> ConduitT i (PosixPath, ByteString) CLI ()
-fetchCabal name mVer =
+fetchCabal :: HackageDist -> ConduitT i (PosixPath, ByteString) CLI ()
+fetchCabal (HackageDist name mVer) =
   do hackage <- lift hackageURI
      req     <- parseRequest $ uriToString id (cabalURI hackage) ""
      cabal   <- toStrict <$> (httpSource req getCabal .| sinkLazy)

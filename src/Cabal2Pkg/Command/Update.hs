@@ -11,21 +11,23 @@ import Cabal2Pkg.CmdLine
   , withPkgFlagsModified, runMake )
 import Cabal2Pkg.Command.Common
   ( command, option, fetchMeta, shouldHaveBuildlink3 )
-import Cabal2Pkg.Extractor (PackageMeta(distBase, distVersion))
+import Cabal2Pkg.Extractor (PackageMeta(distBase, distVersion, origin))
 import Cabal2Pkg.Generator.Buildlink3 (genBuildlink3)
 import Cabal2Pkg.Generator.Description (genDESCR)
 import Cabal2Pkg.Generator.Makefile (genMakefile)
-import Cabal2Pkg.Hackage qualified as Hackage
-import Cabal2Pkg.PackageURI (PackageURI(..), isFromHackage, parsePackageURI)
-import Cabal2Pkg.Pretty (Quoted(..), prettyAnsi)
-import Control.Applicative ((<|>))
+import Cabal2Pkg.Pretty (Emphasised(..), Quoted(..), prettyAnsi)
+import Cabal2Pkg.Site
+  ( PackageURI(..), isFromLocalFS, isFromHackage, parsePackageURI
+  , reconstructPackageURI )
+import Cabal2Pkg.Site.Hackage (HackageDist(..))
+import Cabal2Pkg.Site.Hackage qualified as Hackage
 import Control.Exception.Safe (MonadThrow, assert, catch, throw)
 import Control.Monad (unless, when)
+import Control.Monad.Extra (maybeM)
 import Control.Monad.IO.Unlift (MonadUnliftIO)
 import Data.Char (isDigit)
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
-import Data.Maybe (isJust)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
@@ -38,8 +40,6 @@ import Distribution.Types.Flag qualified as C
 import Distribution.Types.PackageId (PackageIdentifier(pkgName, pkgVersion))
 import Distribution.Types.Version (Version)
 import GHC.Stack (HasCallStack)
-import Lens.Micro ((&), (%~))
-import Network.URI.Lens (uriPathLens)
 import Prelude hiding (readFile)
 import Prettyprinter ((<+>), Doc)
 import Prettyprinter qualified as PP
@@ -80,14 +80,16 @@ run opts@(UpdateOptions {..}) =
      -- route getting the set of available versions and see if there's
      -- actually an update.
      pkgId  <- packageId pkg
-     pkgURI <- maybe (pure $ Hackage (pkgName pkgId) Nothing)
+     pkgURI <- maybe (pure . Hackage $ HackageDist (pkgName pkgId) Nothing)
                      (parsePackageURI (Just $ pkgName pkgId))
                      optPackageURI
      let cont = examineNewMeta opts pkg pkgId
      case pkgURI of
-       HTTP _ -> cont pkgURI
-       File _ -> cont pkgURI
-       Hackage name mVer ->
+       HTTP   {} -> cont pkgURI
+       File   {} -> cont pkgURI
+       GitHub {} -> cont pkgURI
+       GitLab {} -> cont pkgURI
+       Hackage (HackageDist name mVer) ->
          do assert (name == pkgName pkgId) (pure ())
             av <- Hackage.fetchAvailableVersions name
             case mVer of
@@ -97,7 +99,7 @@ run opts@(UpdateOptions {..}) =
                 let latest = Hackage.latestPreferred av
                 in
                   if latest > pkgVersion pkgId
-                  then cont (Hackage name (Just latest)) -- Yes it is.
+                  then cont (Hackage $ HackageDist name (Just latest)) -- Yes it is.
                   else alreadyLatest path pkgId
               Just ver ->
                 -- The user requested a specific version. Does it exist?
@@ -248,6 +250,35 @@ unavailable path ver =
                   , "but this specific version is not available in Hackage."
                   ]
 
+noUpstreamForced :: HasCallStack => PosixPath -> CLI ()
+noUpstreamForced path =
+  warn $ PP.hsep [ "You are updating"
+                 , prettyAnsi path
+                 , "with a tarball on the local file system."
+                 , command "update"
+                 , "is assuming that the package has lost its upstream."
+                 , "Proceeding to set"
+                 , prettyAnsi (Quoted "MASTER_SITES")
+                 , "to empty because you explicitly asked to."
+                 ]
+
+noUpstreamRejected :: HasCallStack => PosixPath -> CLI ()
+noUpstreamRejected path =
+  fatal $ PP.hsep [ "You requested to update"
+                  , prettyAnsi path
+                  , "with a tarball on the local file system."
+                  , command "update"
+                  , "is assuming that the package has lost its upstream, i.e. its"
+                  , prettyAnsi (Quoted "MASTER_SITES")
+                  , "needs to be set to empty. But since the package"
+                  , prettyAnsi (Emphasised "did")
+                  , "have an upstream before, this is highly likely to be a mistake."
+                  , "If you really want to do this, re-run"
+                  , command "update"
+                  , "with"
+                  , option "-f"
+                  ]
+
 -- This is a continuation of 'run'. Obtain the package metadata of the
 -- requested version (or the latest one). If it isn't newer than
 -- PKGVERSION_NOREV, then it's clear we can bail out now. We can skip this
@@ -260,7 +291,14 @@ examineNewMeta :: HasCallStack
                -> PackageURI
                -> CLI ()
 examineNewMeta opts@(UpdateOptions {..}) pkg pkgId pkgURI =
-  do path     <- pkgPath
+  do path <- pkgPath
+     when (isFromLocalFS pkgURI) $
+       -- The updated package has no upstreams.
+       do hadMs <- not . null <$> SrcDb.masterSites pkg
+          when hadMs $
+            if optForce
+            then noUpstreamForced path
+            else noUpstreamRejected path
      oldFlags <- packageFlags pkg
      -- This is new metadata. Package flags on the command line should be
      -- merged into old ones found in Makefile. The former should have a
@@ -269,7 +307,7 @@ examineNewMeta opts@(UpdateOptions {..}) pkg pkgId pkgURI =
                  $ fetchMeta pkgURI
      let cont = examineOldMeta opts pkg oldFlags newMeta
      case pkgURI of
-       Hackage _ _ -> cont
+       Hackage {} -> cont
        _ ->
          let ver = distVersion newMeta
          in
@@ -297,40 +335,26 @@ examineOldMeta :: HasCallStack
                -> PackageMeta
                -> CLI ()
 examineOldMeta opts pkg oldFlags newMeta =
-  do path    <- pkgPath
-     isGit   <- (isJust .) . (<|>)
-                <$> SrcDb.githubProject pkg
-                <*> SrcDb.gitlabProject pkg
+  do path      <- pkgPath
+     oldPkgURI <- let err = fatal $ PP.hsep [ prettyAnsi path
+                                            , "has no MASTER_SITES."
+                                            , command mempty
+                                            , "cannot figure out how to update this package."
+                                            ]
+                  in
+                    maybeM err pure $ reconstructPackageURI pkg
      -- As this is old metadata, no package flags on the command line
      -- arguments should be taken account of.
-     oldMeta <-
+     oldMeta   <-
        withPkgFlagsHidden . withPkgFlagsModified (const oldFlags) $
-       if isGit then
-         -- If it's from GitHub or GitLab, we can't construct the actual
-         -- distfile URL by simply concatenating MASTER_SITES, DISTNAME,
-         -- and EXTRACT_SUFX but it's clear it's not from Hackage anyway.
-         fetchDistFile
+       if isFromHackage oldPkgURI then
+         fetchMeta oldPkgURI
        else
-         do ms <- SrcDb.masterSites pkg
-            case ms of
-              [] ->
-                fatal $ PP.hsep [ prettyAnsi path
-                                , "has no MASTER_SITES."
-                                , command mempty
-                                , "cannot figure out how to update this package."
-                                ]
-              (m:_) ->
-                do distName  <- OP.decodeUtf =<< SrcDb.distName pkg
-                   sufx      <- OP.decodeUtf =<< SrcDb.extractSufx pkg
-                   oldPkgURI <- parsePackageURI Nothing $
-                                m & uriPathLens %~ \base -> base <> distName <> sufx
-                   if isFromHackage oldPkgURI
-                     then fetchMeta oldPkgURI
-                     else fetchDistFile
+         fetchDistFile oldPkgURI
      applyChanges opts pkg oldMeta newMeta
   where
-    fetchDistFile :: CLI PackageMeta
-    fetchDistFile =
+    fetchDistFile :: PackageURI -> CLI PackageMeta
+    fetchDistFile pkgURI =
       do runMake ["fetch"]
          dir    <- distDir
          subDir <- SrcDb.distSubDir pkg
@@ -338,7 +362,9 @@ examineOldMeta opts pkg oldFlags newMeta =
          sufx   <- SrcDb.extractSufx pkg
          path   <- OP.decodeUtf
                    $ maybe dir (dir </>) subDir </> name <> sufx
-         fetchMeta (File path)
+         meta   <- fetchMeta (File path)
+         -- Correct the 'origin' because it might not be accurate.
+         pure $ meta { origin = pkgURI }
 
 -- |This is a continuation of 'examineOldMeta'. Perform a 3-way merge based
 -- on the current set of files and the old and new package metadata.
@@ -351,12 +377,12 @@ applyChanges :: HasCallStack
 applyChanges (UpdateOptions {..}) pkg oldMeta newMeta =
   do labelCur <- do distName <- (T.pack <$>) . OP.decodeUtf =<< SrcDb.distName pkg
                     pure $ distName <> " (current)"
-     let labelBase = mconcat [ distBase oldMeta
+     let labelBase = mconcat [ T.pack . prettyShow . distBase    $ oldMeta
                              , "-"
                              , T.pack . prettyShow . distVersion $ oldMeta
                              , " (merge base)"
                              ]
-         labelNew  = mconcat [ distBase newMeta
+         labelNew  = mconcat [ T.pack . prettyShow . distBase    $ newMeta
                              , "-"
                              , T.pack . prettyShow . distVersion $ newMeta
                              , " (new)"

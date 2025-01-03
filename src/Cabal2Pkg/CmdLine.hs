@@ -32,6 +32,8 @@ module Cabal2Pkg.CmdLine
   , ghcVersion
   , installedPkgs
   , srcDb
+  , gitHubURI
+  , gitLabURI
   , hackageURI
   , distDir
 
@@ -546,13 +548,22 @@ ghcVersion
            ver  = fromJust $ C.programVersion ghc'
        pure ver
 
+gitHubURI :: CLI URI
+gitHubURI = siteURI SrcDb.masterSiteGitHub "MASTER_SITE_GITHUB"
+
+gitLabURI :: CLI URI
+gitLabURI = siteURI SrcDb.masterSiteGitLab "MASTER_SITE_GITLAB"
+
 hackageURI :: CLI URI
-hackageURI =
-  do sites <- SrcDb.masterSiteHaskellHackage =<< srcDb
+hackageURI = siteURI SrcDb.masterSiteHaskellHackage "MASTER_SITE_HASKELL_HACKAGE"
+
+siteURI :: (SrcDb CLI -> CLI [URI]) -> Doc AnsiStyle -> CLI URI
+siteURI getter var =
+  do sites <- getter =<< srcDb
      case sites of
        (uri:_) -> pure uri
        []      -> fatal $ PP.hsep [ "Something's wrong with the pkgsrc tree:"
-                                  , prettyAnsi (Quoted "MASTER_SITE_HASKELL_HACKAGE")
+                                  , prettyAnsi (Quoted var)
                                   , "is not defined in"
                                   , prettyAnsi [pstr|mk/fetch/sites.mk|]
                                   ]

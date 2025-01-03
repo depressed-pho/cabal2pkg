@@ -168,7 +168,7 @@ instance Pretty Assignment where
               , if hasTokens
                 then mconcat
                      [ tabs
-                     , pretty () aTokens
+                     , pretty () (escapeToken <$> aTokens)
                      , pprOptionalComment aComment
                      ]
                 else foldMap (pretty ()) aComment
@@ -498,6 +498,7 @@ instance Pretty ForLoop where
             ]
 
 infix 0 #
+-- |Attach a comment to a block.
 (#) :: Block -> Text -> Block
 BBlank      b # c = BBlank      $ b { bComment = Just (Comment c) }
 BAssignment a # c = BAssignment $ a { aComment = Just (Comment c) }
@@ -509,18 +510,23 @@ BDirective  d # _ = BDirective d
 blank :: Block
 blank = BBlank $ Blank Nothing
 
+infix 1 .=
 (.=) :: Variable -> [Text] -> Block
 var .= tokens = BAssignment $ Assignment var Set tokens Nothing
 
+infix 1 .+=
 (.+=) :: Variable -> [Text] -> Block
 var .+= tokens = BAssignment $ Assignment var Append tokens Nothing
 
+infix 1 .?=
 (.?=) :: Variable -> [Text] -> Block
 var .?= tokens = BAssignment $ Assignment var SetIfUndefined tokens Nothing
 
+infix 1 .:=
 (.:=) :: Variable -> [Text] -> Block
 var .:= tokens = BAssignment $ Assignment var ExpandThenSet tokens Nothing
 
+infix 1 .!=
 (.!=) :: Variable -> [Text] -> Block
 var .!= tokens = BAssignment $ Assignment var ExecThenSet tokens Nothing
 
@@ -579,7 +585,7 @@ instance Pretty FoldedAssignment where
                 else mconcat [ tab
                              , PP.backslash
                              , PP.line
-                             , go aTokens
+                             , go (escapeToken <$> aTokens)
                              , pprOptionalComment aComment
                              , PP.line
                              ]
@@ -595,3 +601,8 @@ instance Pretty FoldedAssignment where
                           , PP.line
                           , go xs
                           ]
+
+-- |Escape @#@ in a variable assignment.
+escapeToken :: Text -> Text
+escapeToken = T.replace "#"  "\\#"
+            . T.replace "\\" "\\\\"

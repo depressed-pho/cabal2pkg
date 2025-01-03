@@ -6,7 +6,7 @@ module Cabal2Pkg.Command.Init
   ) where
 
 import Cabal2Pkg.CmdLine
-  ( CLI, InitOptions(..), debug, fatal, info, canonPkgDir, origPkgDir
+  ( CLI, InitOptions(..), debug, fatal, info, warn, canonPkgDir, origPkgDir
   , makeCmd, pkgBase, runMake )
 import Cabal2Pkg.Command.Common
   ( command, option, fetchMeta, shouldHaveBuildlink3, shouldHaveHsPrefix )
@@ -14,14 +14,14 @@ import Cabal2Pkg.Extractor (PackageMeta(distBase))
 import Cabal2Pkg.Generator.Buildlink3 (genBuildlink3)
 import Cabal2Pkg.Generator.Description (genDESCR)
 import Cabal2Pkg.Generator.Makefile (genMakefile)
-import Cabal2Pkg.PackageURI (parsePackageURI)
-import Cabal2Pkg.Pretty (prettyAnsi)
+import Cabal2Pkg.Pretty (Quoted(..), prettyAnsi)
+import Cabal2Pkg.Site (isFromLocalFS, parsePackageURI)
 import Control.Exception.Safe (catch, throw)
 import Control.Monad (when)
 import Data.CaseInsensitive qualified as CI
-import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
 import Data.Text.Lazy.Encoding qualified as TL
+import Distribution.Pretty (prettyShow)
 import GHC.Stack (HasCallStack)
 import Prelude hiding (exp, writeFile)
 import Prettyprinter qualified as PP
@@ -33,7 +33,16 @@ import System.OsPath.Posix qualified as OP
 
 run :: HasCallStack => InitOptions -> CLI ()
 run (InitOptions {..}) =
-  do meta <- fetchMeta =<< parsePackageURI Nothing optPackageURI
+  do pkgURI <- parsePackageURI Nothing optPackageURI
+     when (isFromLocalFS pkgURI) . warn $
+       PP.hsep [ "You are initialising a package with a tarball on the local filesystem."
+               , command "init"
+               , "is assuming that the package has no upstreams, i.e. it will have no"
+               , prettyAnsi (Quoted "MASTER_SITES")
+               , "defined, but this is usually not the case. If not please specify a"
+               , "remote file instead."
+               ]
+     meta <- fetchMeta pkgURI
 
      canonDir <- canonPkgDir
      validatePkgPath meta
@@ -97,7 +106,7 @@ run (InitOptions {..}) =
 initialPLIST :: CLI TL.Text
 initialPLIST =
   do make <- TL.pack <$> (OP.decodeUtf . OP.takeFileName =<< makeCmd)
-     pure . TL.intercalate "\n" $
+     pure . (<> "\n") . TL.intercalate "\n" $
        [ "@comment $NetBSD$"
        , "@comment TODO: To fill this file with the file listing:"
        , "@comment TODO: 1. Run \"" <> make <> " package\""
@@ -107,7 +116,7 @@ initialPLIST =
 validatePkgPath :: PackageMeta -> CLI ()
 validatePkgPath meta
   = do actual   <- pkgBase
-       expWoPfx <- OP.encodeUtf . T.unpack . CI.foldCase . distBase $ meta
+       expWoPfx <- OP.encodeUtf . CI.foldCase . prettyShow . distBase $ meta
        let expWPfx       = [pstr|hs-|] <> expWoPfx
            expAndAct exp = PP.hsep [ "The package should be named"
                                    , prettyAnsi exp

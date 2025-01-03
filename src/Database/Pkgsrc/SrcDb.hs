@@ -8,12 +8,16 @@ module Database.Pkgsrc.SrcDb
     SrcDb
   , Category
   , Package
+  , GitHubType(..)
+  , GitLabType(..)
 
     -- * Construction
   , createSrcDb
 
     -- * Querying
   , distDir
+  , masterSiteGitHub
+  , masterSiteGitLab
   , masterSiteHaskellHackage
   , findPackageByPath
   , findPackageByName
@@ -29,9 +33,21 @@ module Database.Pkgsrc.SrcDb
   , extractSufx
   , maintainer
   , masterSites
-  , githubProject
-  , gitlabProject
   , configureArgs
+
+    -- ** GitHub
+  , gitHubProject
+  , gitHubTag
+  , gitHubRelease
+  , gitHubType
+
+    -- ** GitLab
+  , gitLabProject
+  , gitLabTag
+  , gitLabRelease
+  , gitLabType
+
+    -- ** Haskell
   , includesHaskellMk
   ) where
 
@@ -73,6 +89,8 @@ data SrcDb m
   = SrcDb
     { dCategories                  :: !(HashMap PosixPath (Deferred m (Category m)))
     , dDISTDIR                     :: !(Deferred m PosixPath)
+    , dMASTER_SITE_GITHUB          :: !(Deferred m [URI])
+    , dMASTER_SITE_GITLAB          :: !(Deferred m [URI])
     , dMASTER_SITE_HASKELL_HACKAGE :: !(Deferred m [URI])
     }
 
@@ -96,14 +114,23 @@ data Package m
     , pMAINTAINER        :: Deferred m Text
     , pMASTER_SITES      :: Deferred m [URI]
     , pGITHUB_PROJECT    :: Deferred m (Maybe Text)
+    , pGITHUB_TAG        :: Deferred m (Maybe Text)
+    , pGITHUB_RELEASE    :: Deferred m (Maybe Text)
+    , pGITHUB_TYPE       :: Deferred m (Maybe GitHubType)
     , pGITLAB_PROJECT    :: Deferred m (Maybe Text)
+    , pGITLAB_TAG        :: Deferred m (Maybe Text)
+    , pGITLAB_RELEASE    :: Deferred m (Maybe Text)
+    , pGITLAB_TYPE       :: Deferred m (Maybe GitLabType)
     , pCONFIGURE_ARGS    :: Deferred m [Text]
     , pIncludesHaskellMk :: Deferred m Bool
     }
 
+data GitHubType = GitHubTag | GitHubRelease
+data GitLabType = GitLabTag | GitLabRelease
+
 type VarMap = HashMap Text Text
 
-newtype Getter a = Getter { runGetter :: Text -> Either String a }
+newtype Getter a = Getter { runGetter :: Text -> Either Text a }
 
 instance Functor Getter where
   fmap :: (a -> b) -> Getter a -> Getter b
@@ -141,7 +168,7 @@ instance Alternative Getter where
   many :: forall a. Getter a -> Getter [a]
   many g = Getter $ go . mkWords
     where
-      go :: [Text] -> Either String [a]
+      go :: [Text] -> Either Text [a]
       go []     = Right []
       go (w:ws) = case runGetter g w of
                     Left  e -> Left e
@@ -178,7 +205,7 @@ get var g vm =
   case HM.lookup var vm of
     Nothing  -> error $ T.unpack var <> ": variable not found"
     Just txt -> case runGetter g txt of
-                  Left  e -> error $ T.unpack var <> ": " <> e
+                  Left  e -> error $ T.unpack var <> ": " <> T.unpack e
                   Right a -> a
 
 exists :: Getter Bool
@@ -199,13 +226,13 @@ posixStr =
   if T.null txt then
     Left "variable empty or undefined"
   else
-    mapLeft show . OP.encodeUtf . T.unpack $ txt
+    mapLeft (T.pack . show) . OP.encodeUtf . T.unpack $ txt
 
 absURI :: Getter URI
 absURI =
   Getter $ \txt ->
   case parseAbsoluteURI . T.unpack $ txt of
-    Nothing -> Left $ "not an absolute URI: " <> T.unpack txt
+    Nothing -> Left $ "not an absolute URI: " <> txt
     Just u  -> Right u
 
 int :: Getter Int
@@ -214,9 +241,31 @@ int =
   case TR.decimal txt of
     Right (n, r)
       | T.null r  -> Right n
-      | otherwise -> Left $ "not a decimal number: " <> T.unpack txt
+      | otherwise -> Left $ "not a decimal number: " <> txt
     Left e ->
-      Left e
+      Left $ T.pack e
+
+ghType :: Getter GitHubType
+ghType =
+  Getter $ \txt ->
+  if txt == "tag" then
+    Right GitHubTag
+  else
+    if txt == "release" then
+      Right GitHubRelease
+    else
+      Left $ "invalid GITHUB_TYPE: " <> txt
+
+glType :: Getter GitLabType
+glType =
+  Getter $ \txt ->
+  if txt == "tag" then
+    Right GitLabTag
+  else
+    if txt == "release" then
+      Right GitLabRelease
+    else
+      Left $ "invalid GITHUB_TYPE: " <> txt
 
 -- |Create a database of pkgsrc packages.
 createSrcDb :: forall m.
@@ -229,13 +278,16 @@ createSrcDb makePath root =
            root </> [pstr|pkgtools|] </> [pstr|pkg_install|]
      vars <- defer $ getMakeVars makePath dirPath
                        [ "DISTDIR"
+                       , "MASTER_SITE_GITHUB"
+                       , "MASTER_SITE_GITLAB"
                        , "MASTER_SITE_HASKELL_HACKAGE"
                        ]
      cs   <- cats
-     pure $ SrcDb { dCategories = cs
-                  , dDISTDIR    = get "DISTDIR" posixStr <$> vars
-                  , dMASTER_SITE_HASKELL_HACKAGE =
-                      get "MASTER_SITE_HASKELL_HACKAGE" (many absURI) <$> vars
+     pure $ SrcDb { dCategories                  = cs
+                  , dDISTDIR                     = get "DISTDIR"                     posixStr      <$> vars
+                  , dMASTER_SITE_GITHUB          = get "MASTER_SITE_GITHUB"          (many absURI) <$> vars
+                  , dMASTER_SITE_GITLAB          = get "MASTER_SITE_GITLAB"          (many absURI) <$> vars
+                  , dMASTER_SITE_HASKELL_HACKAGE = get "MASTER_SITE_HASKELL_HACKAGE" (many absURI) <$> vars
                   }
   where
     cats :: m (HashMap PosixPath (Deferred m (Category m)))
@@ -315,7 +367,13 @@ scanPkgs makePath root catName =
                            , "MAINTAINER"
                            , "MASTER_SITES"
                            , "GITHUB_PROJECT"
+                           , "GITHUB_TAG"
+                           , "GITHUB_RELEASE"
+                           , "GITHUB_TYPE"
                            , "GITLAB_PROJECT"
+                           , "GITLAB_TAG"
+                           , "GITLAB_RELEASE"
+                           , "GITLAB_TYPE"
                            , "CONFIGURE_ARGS"
                            , "HASKELL_PKG_NAME"
                            ]
@@ -330,7 +388,13 @@ scanPkgs makePath root catName =
            , pMAINTAINER        = get "MAINTAINER"       text                <$> vars
            , pMASTER_SITES      = get "MASTER_SITES"     (many absURI)       <$> vars
            , pGITHUB_PROJECT    = get "GITHUB_PROJECT"   (optional text)     <$> vars
+           , pGITHUB_TAG        = get "GITHUB_TAG"       (optional text)     <$> vars
+           , pGITHUB_RELEASE    = get "GITHUB_RELEASE"   (optional text)     <$> vars
+           , pGITHUB_TYPE       = get "GITHUB_TYPE"      (optional ghType)   <$> vars
            , pGITLAB_PROJECT    = get "GITLAB_PROJECT"   (optional text)     <$> vars
+           , pGITLAB_TAG        = get "GITLAB_TAG"       (optional text)     <$> vars
+           , pGITLAB_RELEASE    = get "GITLAB_PROJECT"   (optional text)     <$> vars
+           , pGITLAB_TYPE       = get "GITLAB_TYPE"      (optional glType)   <$> vars
            , pCONFIGURE_ARGS    = get "CONFIGURE_ARGS"   (many text)         <$> vars
            , pIncludesHaskellMk = get "HASKELL_PKG_NAME" exists              <$> vars
            }
@@ -385,6 +449,12 @@ filterPkgs catPath = (catMaybes <$>) . mapConcurrently go
 distDir :: MonadUnliftIO m => SrcDb m -> m PosixPath
 distDir = force . dDISTDIR
 
+masterSiteGitHub :: MonadUnliftIO m => SrcDb m -> m [URI]
+masterSiteGitHub = force . dMASTER_SITE_GITHUB
+
+masterSiteGitLab :: MonadUnliftIO m => SrcDb m -> m [URI]
+masterSiteGitLab = force . dMASTER_SITE_GITLAB
+
 masterSiteHaskellHackage :: MonadUnliftIO m => SrcDb m -> m [URI]
 masterSiteHaskellHackage = force . dMASTER_SITE_HASKELL_HACKAGE
 
@@ -430,6 +500,9 @@ findPackageCommon (SrcDb {..}) q
 pkgPath :: Package m -> PosixPath
 pkgPath = pPKGPATH
 
+-- Gee.. We don't like this boilerplate... Should we use TemplateHaskell
+-- just for this?
+
 distName :: MonadUnliftIO m => Package m -> m PosixString
 distName = force . pDISTNAME
 
@@ -454,11 +527,29 @@ maintainer = force . pMAINTAINER
 masterSites :: MonadUnliftIO m => Package m -> m [URI]
 masterSites = force . pMASTER_SITES
 
-githubProject :: MonadUnliftIO m => Package m -> m (Maybe Text)
-githubProject = force . pGITHUB_PROJECT
+gitHubProject :: MonadUnliftIO m => Package m -> m (Maybe Text)
+gitHubProject = force . pGITHUB_PROJECT
 
-gitlabProject :: MonadUnliftIO m => Package m -> m (Maybe Text)
-gitlabProject = force . pGITLAB_PROJECT
+gitHubTag :: MonadUnliftIO m => Package m -> m (Maybe Text)
+gitHubTag = force . pGITHUB_TAG
+
+gitHubRelease :: MonadUnliftIO m => Package m -> m (Maybe Text)
+gitHubRelease = force . pGITHUB_RELEASE
+
+gitHubType :: MonadUnliftIO m => Package m -> m (Maybe GitHubType)
+gitHubType = force . pGITHUB_TYPE
+
+gitLabProject :: MonadUnliftIO m => Package m -> m (Maybe Text)
+gitLabProject = force . pGITLAB_PROJECT
+
+gitLabTag :: MonadUnliftIO m => Package m -> m (Maybe Text)
+gitLabTag = force . pGITLAB_TAG
+
+gitLabRelease :: MonadUnliftIO m => Package m -> m (Maybe Text)
+gitLabRelease = force . pGITLAB_RELEASE
+
+gitLabType :: MonadUnliftIO m => Package m -> m (Maybe GitLabType)
+gitLabType = force . pGITLAB_TYPE
 
 configureArgs :: MonadUnliftIO m => Package m -> m [Text]
 configureArgs = force . pCONFIGURE_ARGS

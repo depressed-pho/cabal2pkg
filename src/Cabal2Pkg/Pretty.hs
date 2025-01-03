@@ -1,5 +1,6 @@
 module Cabal2Pkg.Pretty
   ( PrettyAnsi(..)
+  , Emphasised(..)
   , Quoted(..)
   ) where
 
@@ -40,9 +41,15 @@ instance PrettyAnsi Version where
 instance PrettyAnsi URI where
   prettyAnsi = prettyAnsi . Quoted . PP.viaShow
 
+newtype Emphasised = Emphasised (Doc AnsiStyle)
+instance PrettyAnsi Emphasised where
+  prettyAnsi (Emphasised doc) =
+    mconcat [ PP.pretty '*'
+            , PP.annotate PP.bold doc
+            , PP.pretty '*'
+            ]
 
 newtype Quoted = Quoted (Doc AnsiStyle)
-
 instance PrettyAnsi Quoted where
   prettyAnsi (Quoted doc) =
     PP.dquotes (PP.annotate (PP.colorDull PP.Cyan) doc)

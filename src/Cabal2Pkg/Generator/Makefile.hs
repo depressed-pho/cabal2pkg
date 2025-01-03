@@ -15,6 +15,9 @@ import Cabal2Pkg.Extractor.Dependency.Executable (ExeDep(..))
 import Cabal2Pkg.Extractor.Dependency.ExternalLib (ExtLibDep(..))
 import Cabal2Pkg.Extractor.Dependency.Library (LibDep(..))
 import Cabal2Pkg.Extractor.Dependency.PkgConfig (PkgConfDep(..))
+import Cabal2Pkg.Site (PackageURI(..), isFromHackage)
+import Cabal2Pkg.Site.GitHub (genGitHubMasterSites)
+import Cabal2Pkg.Site.GitLab (genGitLabMasterSites)
 import Data.Data (gmapQl)
 import Data.Generics.Aliases (GenericQ, mkQ)
 import Data.Map qualified as M
@@ -33,7 +36,10 @@ import Language.BMake.AST
   ( Makefile(..), Block(..), Directive(..), (#), (.=), (.+=), blank, include
   , prettyPrintAST )
 import Language.BMake.AST qualified as AST
-import Lens.Micro ((&), (^.), (.~), to)
+import Lens.Micro ((&), (^.), (%~), (.~), to)
+import Network.URI (uriToString)
+import Network.URI.Lens (uriPathLens)
+import System.FilePath.Posix qualified as FP
 
 
 genMakefile :: HasCallStack => PackageMeta -> TL.Text
@@ -69,32 +75,34 @@ genAST pm
              -- point would cause a major breakage. So we need to
              -- explicitly define it here whenever pkgBase isn't equal to
              -- hs-{distBase}.
-             <> (if pkgBase pm == "hs-" <> distBase pm then
+             <> (if pkgBase pm == "hs-" <> distBase' then
                    mempty
                  else
-                   [ "PKGNAME" .= pure (if pkgBase pm == distBase pm then
+                   [ "PKGNAME" .= pure (if pkgBase pm == distBase' then
                                           "${DISTNAME}"
                                         else
                                           "${DISTNAME:tl}")
                    ])
              <> [ "CATEGORIES" .= categories pm ]
-                -- FIXME: Consider the cases where it's GitHub or GitLab.
-             <> case masterSites pm of
-                  [] -> []
-                  ms -> [ "MASTER_SITES" .= ms ]
+             <> genMasterSites pm
              <> [ blank
                 , "MAINTAINER" .= pure (maintainer pm)
                 ]
-             <> case homepage pm of
-                  Nothing -> []
-                  Just hp -> [ "HOMEPAGE" .= pure hp ]
+             -- mk/haskell.mk has a good default for packages coming from
+             -- Hackage.
+             <> [ "HOMEPAGE" .= pure (homepage pm)
+                | not . isFromHackage $ origin pm
+                ]
              <> [ "COMMENT"    .= pure (comment pm)
                 , "LICENSE"    .= pure (license pm)
                 , blank
                 ]
 
+    distBase' :: Text
+    distBase' = T.pack . prettyShow . distBase $ pm
+
     distName :: Text
-    distName = mconcat [ distBase pm
+    distName = mconcat [ distBase'
                        , "-"
                        , T.pack . prettyShow . distVersion $ pm
                        ]
@@ -190,6 +198,26 @@ genAST pm
              [ include "../../mk/haskell.mk"
              , include "../../mk/bsd.pkg.mk"
              ]
+
+genMasterSites :: HasCallStack => PackageMeta -> [Block]
+genMasterSites pm =
+  case origin pm of
+    HTTP httpURI ->
+      let httpURI' = httpURI & uriPathLens %~ FP.dropFileName
+      in
+        [ "MASTER_SITES" .= [T.pack $ uriToString id httpURI' ""] ]
+
+    File {} ->
+      [ "MASTER_SITES" .= [] # "empty" ]
+
+    GitHub dist ->
+      genGitHubMasterSites (pkgBase pm) (distVersion pm) dist
+
+    GitLab dist ->
+      genGitLabMasterSites (pkgBase pm) (distVersion pm) dist
+
+    Hackage {} ->
+      [] -- mk/haskell.mk takes care of this.
 
 -- | Generate a Makefile AST for component dependencies like
 --
@@ -340,7 +368,7 @@ genLibDepAST pm cm (KnownLib {..})
       -- optparse-applicative. Most of the time, if not always, their
       -- command-line interface is built on top of optparse-applicative and
       -- thus support generating shell completion scripts.
-      = let exeDecl = if cm ^. cName == distBase pm
+      = let exeDecl = if cm ^. cName == (T.pack . prettyShow . distBase) pm
                       then mempty
                       else Makefile [ "OPTPARSE_APPLICATIVE_EXECUTABLES" .+= [cm ^. cName] ]
         in
