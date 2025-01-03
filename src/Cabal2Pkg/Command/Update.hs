@@ -7,8 +7,8 @@ module Cabal2Pkg.Command.Update
 
 import Cabal2Pkg.CmdLine
   ( CLI, UpdateOptions(..), FlagMap, debug, fatal, info, warn, pkgPath, srcDb
-  , canonPkgDir, origPkgDir, makeCmd, withPkgFlagsHidden, withPkgFlagsModified
-  , runMake )
+  , distDir, canonPkgDir, origPkgDir, makeCmd, withPkgFlagsHidden
+  , withPkgFlagsModified, runMake )
 import Cabal2Pkg.Command.Common
   ( command, option, fetchMeta, shouldHaveBuildlink3 )
 import Cabal2Pkg.Extractor (PackageMeta(distBase, distVersion))
@@ -332,12 +332,12 @@ examineOldMeta opts pkg oldFlags newMeta =
     fetchDistFile :: CLI PackageMeta
     fetchDistFile =
       do runMake ["fetch"]
-         distDir    <- SrcDb.distDir =<< srcDb
-         distSubDir <- SrcDb.distSubDir pkg
-         distName   <- SrcDb.distName pkg
-         sufx       <- SrcDb.extractSufx pkg
-         path       <- OP.decodeUtf
-                       $ maybe distDir (distDir </>) distSubDir </> distName <> sufx
+         dir    <- distDir
+         subDir <- SrcDb.distSubDir pkg
+         name   <- SrcDb.distName pkg
+         sufx   <- SrcDb.extractSufx pkg
+         path   <- OP.decodeUtf
+                   $ maybe dir (dir </>) subDir </> name <> sufx
          fetchMeta (File path)
 
 -- |This is a continuation of 'examineOldMeta'. Perform a 3-way merge based

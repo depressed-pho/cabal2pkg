@@ -32,9 +32,9 @@ option :: Doc AnsiStyle -> Doc AnsiStyle
 option = PP.annotate (PP.colorDull PP.Green)
 
 -- |Fetch a package metadata from a URI. If the package URI starts with
--- "{hackageURI}/package/" or it has no scheme, then it means this package
--- came from Hackage. In that case we omit MASTER_SITES and HOMEPAGE
--- because mk/haskell.mk takes care of them.
+-- hackageURI or it has no scheme, then it means this package came from
+-- Hackage. In that case we omit MASTER_SITES and HOMEPAGE because
+-- mk/haskell.mk takes care of them.
 fetchMeta :: HasCallStack => PackageURI -> CLI PackageMeta
 fetchMeta uri =
   do info $ PP.hsep [ "Fetching"

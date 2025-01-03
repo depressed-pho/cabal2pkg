@@ -4,16 +4,22 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 module Database.Pkgsrc.SrcDb
-  ( SrcDb
+  ( -- * Types
+    SrcDb
   , Category
   , Package
+
+    -- * Construction
   , createSrcDb
+
+    -- * Querying
   , distDir
+  , masterSiteHaskellHackage
   , findPackageByPath
   , findPackageByName
   , findPackageByNameCI
 
-    -- Accessors
+    -- * Accessors
   , pkgPath
   , distName
   , distSubDir
@@ -65,8 +71,9 @@ import UnliftIO.Async (mapConcurrently)
 
 data SrcDb m
   = SrcDb
-    { dCategories :: !(HashMap PosixPath (Deferred m (Category m)))
-    , dDISTDIR    :: !(Deferred m PosixPath)
+    { dCategories                  :: !(HashMap PosixPath (Deferred m (Category m)))
+    , dDISTDIR                     :: !(Deferred m PosixPath)
+    , dMASTER_SITE_HASKELL_HACKAGE :: !(Deferred m [URI])
     }
 
 -- |A category of pkgsrc packages. It has nothing to do with category
@@ -194,8 +201,8 @@ posixStr =
   else
     mapLeft show . OP.encodeUtf . T.unpack $ txt
 
-uri :: Getter URI
-uri =
+absURI :: Getter URI
+absURI =
   Getter $ \txt ->
   case parseAbsoluteURI . T.unpack $ txt of
     Nothing -> Left $ "not an absolute URI: " <> T.unpack txt
@@ -217,7 +224,19 @@ createSrcDb :: forall m.
             => PosixPath -- ^The path to BSD make(1) command.
             -> PosixPath -- ^The root directory of pkgsrc tree, typically @/usr/pkgsrc@.
             -> m (SrcDb m)
-createSrcDb makePath root = SrcDb <$> cats <*> dists
+createSrcDb makePath root =
+  do let dirPath = -- Any package will do.
+           root </> [pstr|pkgtools|] </> [pstr|pkg_install|]
+     vars <- defer $ getMakeVars makePath dirPath
+                       [ "DISTDIR"
+                       , "MASTER_SITE_HASKELL_HACKAGE"
+                       ]
+     cs   <- cats
+     pure $ SrcDb { dCategories = cs
+                  , dDISTDIR    = get "DISTDIR" posixStr <$> vars
+                  , dMASTER_SITE_HASKELL_HACKAGE =
+                      get "MASTER_SITE_HASKELL_HACKAGE" (many absURI) <$> vars
+                  }
   where
     cats :: m (HashMap PosixPath (Deferred m (Category m)))
     cats = listDirectory root
@@ -235,15 +254,6 @@ createSrcDb makePath root = SrcDb <$> cats <*> dists
            { cPackages   = pkgs
            , cPackagesCI = HM.mapKeys CI.mk pkgs
            }
-
-    dists :: m (Deferred m PosixPath)
-    dists =
-      do let dirPath = -- Any package will do.
-               root </> [pstr|pkgtools|] </> [pstr|pkg_install|]
-         vars <- defer $ getMakeVars makePath dirPath
-                           [ "DISTDIR"
-                           ]
-         pure $ get "DISTDIR" posixStr <$> vars
 
 -- |Only include directories that has a Makefile including
 -- @../mk/misc/category.mk@. Also exclude @wip@.
@@ -318,7 +328,7 @@ scanPkgs makePath root catName =
            , pPKGREVISION       = get "PKGREVISION"      (optional int)      <$> vars
            , pEXTRACT_SUFX      = get "EXTRACT_SUFX"     posixStr            <$> vars
            , pMAINTAINER        = get "MAINTAINER"       text                <$> vars
-           , pMASTER_SITES      = get "MASTER_SITES"     (many uri)          <$> vars
+           , pMASTER_SITES      = get "MASTER_SITES"     (many absURI)       <$> vars
            , pGITHUB_PROJECT    = get "GITHUB_PROJECT"   (optional text)     <$> vars
            , pGITLAB_PROJECT    = get "GITLAB_PROJECT"   (optional text)     <$> vars
            , pCONFIGURE_ARGS    = get "CONFIGURE_ARGS"   (many text)         <$> vars
@@ -374,6 +384,9 @@ filterPkgs catPath = (catMaybes <$>) . mapConcurrently go
 
 distDir :: MonadUnliftIO m => SrcDb m -> m PosixPath
 distDir = force . dDISTDIR
+
+masterSiteHaskellHackage :: MonadUnliftIO m => SrcDb m -> m [URI]
+masterSiteHaskellHackage = force . dMASTER_SITE_HASKELL_HACKAGE
 
 -- |Search for a package by a PKGPATH e.g. @"devel/hs-lens"
 findPackageByPath :: MonadUnliftIO m => SrcDb m -> PosixPath -> m (Maybe (Package m))

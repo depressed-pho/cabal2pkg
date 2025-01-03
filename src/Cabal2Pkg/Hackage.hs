@@ -109,7 +109,6 @@ fetchAvailableVersions name =
     avURI hackage =
       hackage & uriPathLens %~ \base ->
       FP.joinPath [ base
-                  , "package"
                   , prettyShow name <> ".json"
                   ]
 
@@ -119,7 +118,7 @@ fetchCabal :: PackageName
            -> ConduitT i (PosixPath, ByteString) CLI ()
 fetchCabal name mVer =
   do hackage <- lift hackageURI
-     req     <- parseRequest $ uriToString id (cabalURI hackage)""
+     req     <- parseRequest $ uriToString id (cabalURI hackage) ""
      cabal   <- toStrict <$> (httpSource req getCabal .| sinkLazy)
      file    <- OP.encodeUtf cabalFile
      yield (file, cabal)
@@ -133,7 +132,6 @@ fetchCabal name mVer =
     cabalURI hackage =
       hackage & uriPathLens %~ \base ->
       FP.joinPath [ base
-                  , "package"
                   , prettyShow name <> foldMap (("-" <>) . prettyShow) mVer
                   , "revision"
                   , "0.cabal"

@@ -30,9 +30,10 @@ module Cabal2Pkg.CmdLine
   , showPkgFlags
   , progDb
   , ghcVersion
-  , hackageURI
   , installedPkgs
   , srcDb
+  , hackageURI
+  , distDir
 
     -- * Modifying the context
   , withPkgFlagsHidden
@@ -48,7 +49,7 @@ module Cabal2Pkg.CmdLine
   , runMake
   ) where
 
-import Cabal2Pkg.Pretty (prettyAnsi)
+import Cabal2Pkg.Pretty (Quoted(..), prettyAnsi)
 import Cabal2Pkg.Static (makeQ)
 import Control.Applicative ((<|>), (<**>), many, optional)
 import Control.Concurrent.Deferred (Deferred, defer, force)
@@ -70,6 +71,7 @@ import Data.Text qualified as T
 import Data.Text.Lazy.Merge (MarkerStyle(..))
 import Data.Version (showVersion)
 import Database.Pkgsrc.SrcDb (SrcDb, createSrcDb)
+import Database.Pkgsrc.SrcDb qualified as SrcDb
 import Distribution.Parsec (explicitEitherParsec)
 import Distribution.Simple.Compiler qualified as C
 import Distribution.Simple.GHC qualified as GHC
@@ -84,7 +86,6 @@ import Distribution.Types.Version (Version)
 import Distribution.Verbosity (silent)
 import GHC.Paths.PosixPath qualified as Paths
 import Network.URI (URI, parseAbsoluteURI, parseURIReference)
-import Network.URI.Static (uri)
 import Options.Applicative (Parser, ParserInfo, ParserPrefs, ReadM)
 import Options.Applicative qualified as OA
 import Lens.Micro ((^.), (.~), (%~))
@@ -144,7 +145,6 @@ data Options
     , _optPkgDir   :: !PosixPath
     , _optPkgFlags :: !FlagMap
     , _optGHCCmd   :: !PosixPath
-    , _optHackage  :: !URI
     , _optMakeCmd  :: !PosixPath
     }
   deriving (Show)
@@ -242,13 +242,6 @@ optionsP noColor =
         OA.showDefault <>
         OA.value Paths.ghc <>
         OA.metavar "FILE"
-      )
-  <*> OA.option absoluteURI
-      ( OA.long "hackage" <>
-        OA.help "The URI of an instance of Hackage repository to use" <>
-        OA.showDefault <>
-        OA.value [uri|https://hackage.haskell.org/|] <>
-        OA.metavar "URI"
       )
   <*> OA.option path
       ( OA.long "make" <>
@@ -554,7 +547,18 @@ ghcVersion
        pure ver
 
 hackageURI :: CLI URI
-hackageURI = (^. optHackage) <$> options
+hackageURI =
+  do sites <- SrcDb.masterSiteHaskellHackage =<< srcDb
+     case sites of
+       (uri:_) -> pure uri
+       []      -> fatal $ PP.hsep [ "Something's wrong with the pkgsrc tree:"
+                                  , prettyAnsi (Quoted "MASTER_SITE_HASKELL_HACKAGE")
+                                  , "is not defined in"
+                                  , prettyAnsi [pstr|mk/fetch/sites.mk|]
+                                  ]
+
+distDir :: CLI PosixPath
+distDir = srcDb >>= SrcDb.distDir
 
 installedPkgs :: CLI InstalledPackageIndex
 installedPkgs = CLI (asks (^. ctxIPI)) >>= force

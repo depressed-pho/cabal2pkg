@@ -56,7 +56,7 @@ parseHTTPURI uri = fromMaybe (HTTP uri) . go <$> hackageURI
          -- The first segment after "package" should be
          -- "{PACKAGE}-{VERSION}". The second one should be
          -- "{PACKAGE}-{VERSION}.tar.gz".
-         [s1, s2] <- let nDrop = (L.length (pathSegments hackage) + 1)
+         [s1, s2] <- let nDrop = L.length (pathSegments hackage)
                          segs  = pathSegments uri
                      in
                        Just $ L.drop nDrop segs
