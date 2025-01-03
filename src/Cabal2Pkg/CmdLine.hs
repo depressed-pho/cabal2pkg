@@ -425,9 +425,10 @@ initialCtx opts
 
 mkCanonPkgDir :: CLI PosixPath
 mkCanonPkgDir =
-  do dir  <- (liftIO . canonicalizePath) . (^. optPkgDir) =<< options
+  do dir <- (liftIO . canonicalizePath) . (^. optPkgDir) =<< options
      -- Does it look like a package directory?
-     p    <- liftIO $ doesFileExist (dir </> [pstr|../../mk/bsd.pkg.mk|])
+     let mk = OP.takeDirectory (OP.takeDirectory dir) </> [pstr|mk|] </> [pstr|bsd.pkg.mk|]
+     p   <- liftIO $ doesFileExist mk
      unless p $
        fatal ( prettyAnsi dir <+>
                "doesn't look like a pkgsrc package directory" )

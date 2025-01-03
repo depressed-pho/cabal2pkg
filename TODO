@@ -1,0 +1,3 @@
+# -*- org -*-
+
+* TODO [#A] =cabal update= should try to extract ChangeLog entries

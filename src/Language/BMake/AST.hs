@@ -171,7 +171,7 @@ instance Pretty Assignment where
                      , pretty () (escapeToken <$> aTokens)
                      , pprOptionalComment aComment
                      ]
-                else foldMap (pretty ()) aComment
+                else foldMap ((tabs <>) . pretty ()) aComment
               , PP.line
               ]
     where

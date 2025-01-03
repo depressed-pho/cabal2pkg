@@ -88,13 +88,21 @@ genAST pm
              <> [ blank
                 , "MAINTAINER" .= pure (maintainer pm)
                 ]
-             -- mk/haskell.mk has a good default for packages coming from
-             -- Hackage.
-             <> [ "HOMEPAGE" .= pure (homepage pm)
-                | not . isFromHackage $ origin pm
-                ]
-             <> [ "COMMENT"    .= pure (comment pm)
-                , "LICENSE"    .= pure (license pm)
+             <> case homepage pm of
+                  _ | isFromHackage (origin pm) ->
+                        -- mk/haskell.mk has a good default for packages
+                        -- coming from Hackage.
+                        []
+                  h | T.null h  ->
+                        [ "HOMEPAGE" .= mempty # "TODO" ]
+                    | otherwise ->
+                        [ "HOMEPAGE" .= pure h ]
+             <> case comment pm of
+                  c | T.null c ->
+                        [ "COMMENT" .= mempty # "TODO: Short description of the package" ]
+                    | otherwise ->
+                        [ "COMMENT" .= pure (comment pm) ]
+             <> [ "LICENSE" .= pure (license pm)
                 , blank
                 ]
 
