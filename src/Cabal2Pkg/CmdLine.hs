@@ -94,7 +94,7 @@ import GHC.Paths.PosixPath qualified as Paths
 import Network.URI (URI, parseAbsoluteURI, parseURIReference)
 import Options.Applicative (Parser, ParserInfo, ParserPrefs, ReadM)
 import Options.Applicative qualified as OA
-import Lens.Micro ((^.), (.~), (%~))
+import Lens.Micro ((^.), (.~), (%~), to)
 import Lens.Micro.TH (makeLenses)
 import PackageInfo_cabal2pkg qualified as PI
 import Prelude hiding (print)
@@ -144,14 +144,14 @@ type FlagMap = Map FlagName Bool
 
 data Options
   = Options
-    { _optCommand   :: !Command
-    , _optColour    :: !ColourPref
-    , _optCommitMsg :: !Bool
-    , _optDebug     :: !Bool
-    , _optPkgDir    :: !PosixPath
-    , _optPkgFlags  :: !FlagMap
-    , _optGHCCmd    :: !PosixPath
-    , _optMakeCmd   :: !PosixPath
+    { _optCommand     :: !Command
+    , _optColour      :: !ColourPref
+    , _optNoCommitMsg :: !Bool
+    , _optDebug       :: !Bool
+    , _optPkgDir      :: !PosixPath
+    , _optPkgFlags    :: !FlagMap
+    , _optGHCCmd      :: !PosixPath
+    , _optMakeCmd     :: !PosixPath
     }
   deriving (Show)
 makeLenses ''Options
@@ -222,10 +222,10 @@ optionsP noColor =
                , OA.metavar "WHEN"
                ])
   <*> OA.switch
-      (mconcat [ OA.long "commit-msg"
-               , OA.short 'c'
+      (mconcat [ OA.long "no-commit-msg"
+               , OA.short 'n'
                , OA.help $ mconcat
-                 [ "Create a file named COMMIT_MSG in the package"
+                 [ "Suppress creating a file named COMMIT_MSG in the package"
                  , " directory; suitable for committing changes to VCS"
                  ]
                ])
@@ -537,7 +537,7 @@ command :: CLI Command
 command = (^. optCommand) <$> options
 
 wantCommitMsg :: CLI Bool
-wantCommitMsg = (^. optCommitMsg) <$> options
+wantCommitMsg = (^. optNoCommitMsg . to not) <$> options
 
 origPkgDir :: CLI PosixPath
 origPkgDir = (^. optPkgDir) <$> options
