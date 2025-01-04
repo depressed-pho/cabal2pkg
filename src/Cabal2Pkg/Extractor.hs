@@ -12,12 +12,14 @@ import Cabal2Pkg.CmdLine qualified as CLI
 import Cabal2Pkg.Extractor.Component
   ( ComponentMeta(..), ComponentType(..), cType, extractComponents )
 import Cabal2Pkg.Extractor.License (extractLicense)
+import Cabal2Pkg.RawMeta (RawMeta(..))
 import Cabal2Pkg.Site (PackageURI)
 import Data.Data (Data)
 import Data.Maybe (fromMaybe)
 import Data.Set (Set)
 import Data.Text (Text)
 import Data.Text qualified as T
+import Data.Text.Lazy qualified as TL
 import Distribution.Types.GenericPackageDescription (GenericPackageDescription)
 import Distribution.Types.GenericPackageDescription qualified as GPD
 import Distribution.Types.PackageDescription (PackageDescription)
@@ -43,6 +45,7 @@ data PackageMeta = PackageMeta
   , comment     :: !Text
   , description :: !Text
   , license     :: !Text
+  , changeLog   :: !(Maybe TL.Text)
   , flags       :: !FlagMap
   , unrestrict  :: !(Set Text)
   , components  :: ![ComponentMeta]
@@ -52,8 +55,8 @@ data PackageMeta = PackageMeta
 -- |Construct a 'PackageMeta' from a given package description. This
 -- function does not take account of the current state of the PKGPATH, that
 -- is, it doesn't read its @Makefile@ even if it exists.
-summariseCabal :: PackageURI -> GenericPackageDescription -> CLI PackageMeta
-summariseCabal pkgURI gpd
+summariseCabal :: RawMeta -> CLI PackageMeta
+summariseCabal rawMeta
   = do path     <- (T.pack <$>) . OP.decodeUtf =<< CLI.pkgPath
        base     <- (T.pack <$>) . OP.decodeUtf =<< CLI.pkgBase
        cat      <- (T.pack <$>) . OP.decodeUtf =<< CLI.pkgCategory
@@ -66,17 +69,21 @@ summariseCabal pkgURI gpd
          , pkgBase     = base
          , pkgPath     = path
          , categories  = [cat]
-         , origin      = pkgURI
+         , origin      = rmPackageURI rawMeta
          , maintainer  = fromMaybe "pkgsrc-users@NetBSD.org" mtr
          , homepage    = T.pack . ST.fromShortText . PD.homepage $ pd
          , comment     = T.pack . ST.fromShortText . PD.synopsis $ pd
          , description = extractDescription pd
          , license     = extractLicense pd
+         , changeLog   = rmChangeLog rawMeta
          , flags       = fs
          , unrestrict  = ts
          , components  = cs
          }
   where
+    gpd :: GenericPackageDescription
+    gpd = rmGPD rawMeta
+
     pd :: PackageDescription
     pd = GPD.packageDescription gpd
 

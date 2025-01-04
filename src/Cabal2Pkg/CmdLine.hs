@@ -19,6 +19,7 @@ module Cabal2Pkg.CmdLine
 
     -- * Query
   , command
+  , wantCommitMsg
   , pkgBase
   , pkgCategory
   , pkgPath
@@ -140,14 +141,14 @@ type FlagMap = Map FlagName Bool
 
 data Options
   = Options
-    { _optCommand  :: !Command
-      -- ^'Nothing' denotes @auto@
-    , _optColour   :: !ColourPref
-    , _optDebug    :: !Bool
-    , _optPkgDir   :: !PosixPath
-    , _optPkgFlags :: !FlagMap
-    , _optGHCCmd   :: !PosixPath
-    , _optMakeCmd  :: !PosixPath
+    { _optCommand   :: !Command
+    , _optColour    :: !ColourPref
+    , _optCommitMsg :: !Bool
+    , _optDebug     :: !Bool
+    , _optPkgDir    :: !PosixPath
+    , _optPkgFlags  :: !FlagMap
+    , _optGHCCmd    :: !PosixPath
+    , _optMakeCmd   :: !PosixPath
     }
   deriving (Show)
 makeLenses ''Options
@@ -203,56 +204,68 @@ optionsP noColor =
   Options
   <$> commandP
   <*> OA.option colourPref
-      ( OA.long "colour" <>
-        OA.long "color" <>
-        OA.help ("Use colours on output. WHEN can be \"never\", \"always\", or " <>
-                 "\"auto\", where \"auto\" enables colours only when the stderr " <>
-                 "is a terminal") <>
-        OA.completeWith completeColourPref <>
-        OA.value (defaultColourPref noColor) <>
-        OA.showDefault <>
-        OA.metavar "WHEN"
-      )
+      (mconcat [ OA.long "colour"
+               , OA.long "color"
+               , OA.help $ mconcat
+                 [ "Use colours on output. WHEN can be \"never\", \"always\", or "
+                 , "\"auto\", where \"auto\" enables colours only when the stderr "
+                 , "is a terminal"
+                 ]
+               , OA.completeWith completeColourPref
+               , OA.value (defaultColourPref noColor)
+               , OA.showDefault
+               , OA.metavar "WHEN"
+               ])
   <*> OA.switch
-      ( OA.long "debug" <>
-        OA.short 'd' <>
-        OA.help ("Show debugging output that is only useful for developing " <>
-                 PI.name)
-      )
+      (mconcat [ OA.long "commit-msg"
+               , OA.short 'c'
+               , OA.help $ mconcat
+                 [ "Create a file named COMMIT_MSG in the package"
+                 , " directory; suitable for committing changes to VCS"
+                 ]
+               ])
+  <*> OA.switch
+      (mconcat [ OA.long "debug"
+               , OA.short 'd'
+               , OA.help $ mconcat
+                 [ "Show debugging output that is only useful for developing "
+                 , PI.name
+                 ]
+               ])
   <*> OA.option path
-      ( OA.long "pkgdir" <>
-        OA.short 'p' <>
-        OA.help "The path to the pkgsrc package to work with" <>
-        OA.action "directory" <>
-        OA.showDefault <>
-        OA.value [pstr|.|] <>
-        OA.metavar "DIR"
-      )
+      (mconcat [ OA.long "pkgdir"
+               , OA.short 'p'
+               , OA.help "The path to the pkgsrc package to work with"
+               , OA.action "directory"
+               , OA.showDefault
+               , OA.value [pstr|.|]
+               , OA.metavar "DIR"
+               ])
   <*> ( M.unions <$> many
         ( OA.option flagMap
-          ( OA.long "flag" <>
-            OA.short 'f' <>
-            OA.help "Cabal package flags to apply, such as \"+foo -bar\"" <>
-            OA.metavar "FLAG"
-          )
+          (mconcat [ OA.long "flag"
+                   , OA.short 'f'
+                   , OA.help "Cabal package flags to apply, such as \"+foo -bar\""
+                   , OA.metavar "FLAG"
+                   ])
         )
       )
   <*> OA.option path
-      ( OA.long "ghc" <>
-        OA.help "The path to the GHC executable" <>
-        OA.action "file" <>
-        OA.showDefault <>
-        OA.value Paths.ghc <>
-        OA.metavar "FILE"
-      )
+      (mconcat [ OA.long "ghc"
+               , OA.help "The path to the GHC executable"
+               , OA.action "file"
+               , OA.showDefault
+               , OA.value Paths.ghc
+               , OA.metavar "FILE"
+               ])
   <*> OA.option path
-      ( OA.long "make" <>
-        OA.help "The path to the BSD make(1) command" <>
-        OA.action "file" <>
-        OA.showDefault <>
-        OA.value $$makeQ <>
-        OA.metavar "FILE"
-      )
+      (mconcat [ OA.long "make"
+               , OA.help "The path to the BSD make(1) command"
+               , OA.action "file"
+               , OA.showDefault
+               , OA.value $$makeQ
+               , OA.metavar "FILE"
+               ])
 
 colourPref :: ReadM ColourPref
 colourPref = OA.eitherReader f
@@ -309,49 +322,55 @@ commandP =
     initP =
       (Init .) . InitOptions
       <$> OA.switch
-          ( OA.long "overwrite" <>
-            OA.short 'w' <>
-            OA.help "Overwrite existing files"
-          )
+          (mconcat [ OA.long "overwrite"
+                   , OA.short 'w'
+                   , OA.help "Overwrite existing files"
+                   ])
       <*> OA.argument uriReference
-          ( OA.help ( "http, https, or file URI to a package tarball." <>
-                      " Or just a package name such as \"foo\" if the" <>
-                      " package is from the Hackage repository. In the" <>
-                      " latter case a version number can also be specified" <>
-                      " like \"foo-0.1.2\""
-                    ) <>
-            OA.metavar "PACKAGE-URI"
-          )
+          (mconcat [ OA.help $ mconcat
+                     [ "http, https, or file URI to a package tarball."
+                     , " Or just a package name such as \"foo\" if the"
+                     , " package is from the Hackage repository. In the"
+                     , " latter case a version number can also be specified"
+                     , " like \"foo-0.1.2\""
+                     ]
+                   , OA.metavar "PACKAGE-URI"
+                   ])
 
     updateP :: Parser Command
     updateP =
       ((Update .) .) . UpdateOptions
       <$> OA.switch
-          ( OA.long "force" <>
-            OA.short 'f' <>
-            OA.help ( "Update the package forcefully even if the requested" <>
-                      " version is not a preferred one" )
-          )
+          (mconcat [ OA.long "force"
+                   , OA.short 'f'
+                   , OA.help $ mconcat
+                     [ "Update the package forcefully even if the requested"
+                     , " version is not a preferred one"
+                     ]
+                   ])
       <*> OA.option markerStyle
-          ( OA.long "merge" <>
-            OA.short 'm' <>
-            OA.help ( "3-way merge style: \"rcs\" for RCS merge(1), or" <>
-                      " \"diff3\" for GNU diff3(1)"
-                    ) <>
-            OA.completeWith completeMarkerStyle <>
-            OA.value RCS <>
-            OA.showDefaultWith showMarkerStyle <>
-            OA.metavar "STYLE"
-          )
+          (mconcat [ OA.long "merge"
+                   , OA.short 'm'
+                   , OA.help $ mconcat
+                     [ "3-way merge style: \"rcs\" for RCS merge(1), or"
+                     , " \"diff3\" for GNU diff3(1)"
+                     ]
+                   , OA.completeWith completeMarkerStyle
+                   , OA.value RCS
+                   , OA.showDefaultWith showMarkerStyle
+                   , OA.metavar "STYLE"
+                   ])
       <*> optional
           ( OA.argument uriReference
-            ( OA.help ( "http, https, or file URI to an updated package" <>
-                        " tarball. Or just a version number like" <>
-                        " \"0.1.2\" if the package is from the Hackage" <>
-                        " repository. Omit this if you want to update it" <>
-                        " to the latest version" ) <>
-              OA.metavar "PACKAGE-URI"
-            )
+            (mconcat [ OA.help $ mconcat
+                       [ "http, https, or file URI to an updated package"
+                       , " tarball. Or just a version number like"
+                       , " \"0.1.2\" if the package is from the Hackage"
+                       , " repository. Omit this if you want to update it"
+                       , " to the latest version"
+                       ]
+                     , OA.metavar "PACKAGE-URI"
+                     ])
           )
 
 markerStyle :: ReadM MarkerStyle
@@ -500,6 +519,9 @@ options = CLI $ asks (^. ctxOptions)
 
 command :: CLI Command
 command = (^. optCommand) <$> options
+
+wantCommitMsg :: CLI Bool
+wantCommitMsg = (^. optCommitMsg) <$> options
 
 origPkgDir :: CLI PosixPath
 origPkgDir = (^. optPkgDir) <$> options

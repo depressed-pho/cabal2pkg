@@ -7,11 +7,12 @@ module Cabal2Pkg.Command.Init
 
 import Cabal2Pkg.CmdLine
   ( CLI, InitOptions(..), debug, fatal, info, warn, canonPkgDir, origPkgDir
-  , makeCmd, pkgBase, runMake )
+  , makeCmd, pkgBase, runMake, wantCommitMsg )
 import Cabal2Pkg.Command.Common
   ( command, option, fetchMeta, shouldHaveBuildlink3, shouldHaveHsPrefix )
 import Cabal2Pkg.Extractor (PackageMeta(distBase))
 import Cabal2Pkg.Generator.Buildlink3 (genBuildlink3)
+import Cabal2Pkg.Generator.CommitMsg (genImportMsg)
 import Cabal2Pkg.Generator.Description (genDESCR)
 import Cabal2Pkg.Generator.Makefile (genMakefile)
 import Cabal2Pkg.Pretty (Quoted(..), prettyAnsi)
@@ -62,6 +63,12 @@ run (InitOptions {..}) =
        do let bl3 = genBuildlink3 meta
           debug $ "Generated buildlink3.mk:\n" <> PP.pretty (TL.strip bl3)
           writeFile' [pstr|buildlink3.mk|] bl3
+
+     wantCMsg <- wantCommitMsg
+     when wantCMsg $
+       do let cMsg = genImportMsg meta
+          debug $ "Generated COMMIT_MSG:\n" <> PP.pretty (TL.strip cMsg)
+          writeFile' [pstr|COMMIT_MSG|] cMsg
 
      -- PLIST cannot be directly generated from the package
      -- description. If it already exists we leave them unchanged.

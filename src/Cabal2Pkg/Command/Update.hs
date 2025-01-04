@@ -7,12 +7,13 @@ module Cabal2Pkg.Command.Update
 
 import Cabal2Pkg.CmdLine
   ( CLI, UpdateOptions(..), FlagMap, debug, fatal, info, warn, pkgPath, srcDb
-  , distDir, canonPkgDir, origPkgDir, makeCmd, withPkgFlagsHidden
-  , withPkgFlagsModified, runMake )
+  , distDir, canonPkgDir, origPkgDir, makeCmd, runMake, withPkgFlagsHidden
+  , withPkgFlagsModified, wantCommitMsg )
 import Cabal2Pkg.Command.Common
   ( command, option, fetchMeta, shouldHaveBuildlink3 )
 import Cabal2Pkg.Extractor (PackageMeta(distBase, distVersion, origin))
 import Cabal2Pkg.Generator.Buildlink3 (genBuildlink3)
+import Cabal2Pkg.Generator.CommitMsg (genUpdateMsg)
 import Cabal2Pkg.Generator.Description (genDESCR)
 import Cabal2Pkg.Generator.Makefile (genMakefile)
 import Cabal2Pkg.Pretty (Emphasised(..), Quoted(..), prettyAnsi)
@@ -40,12 +41,12 @@ import Distribution.Types.Flag qualified as C
 import Distribution.Types.PackageId (PackageIdentifier(pkgName, pkgVersion))
 import Distribution.Types.Version (Version)
 import GHC.Stack (HasCallStack)
-import Prelude hiding (readFile)
+import Prelude hiding (readFile, writeFile)
 import Prettyprinter ((<+>), Doc)
 import Prettyprinter qualified as PP
 import Prettyprinter.Render.Terminal (AnsiStyle)
 import System.Directory.PosixPath (removePathForcibly, renameFile)
-import System.File.PosixPath.Alt (readFile, writeFreshFile)
+import System.File.PosixPath.Alt (readFile, writeFile, writeFreshFile)
 import System.IO.Error (isDoesNotExistError)
 import System.OsPath.Posix ((</>), PosixPath, PosixString, pstr)
 import System.OsPath.Posix qualified as OP
@@ -448,6 +449,12 @@ applyChanges (UpdateOptions {..}) pkg oldMeta newMeta =
                    unless (isDoesNotExistError e) $
                      throw e
 
+     wantCMsg <- wantCommitMsg
+     when wantCMsg $
+       do let cMsg = genUpdateMsg oldMeta newMeta
+          debug $ "Generated COMMIT_MSG:\n" <> PP.pretty (TL.strip cMsg)
+          writeFile' [pstr|COMMIT_MSG|] cMsg
+
      -- PLIST cannot be directly generated from the package description. We
      -- have no choice but to leave it unchanged.
 
@@ -526,6 +533,13 @@ renameFile' from to =
   do cfpFrom <- (</> from) <$> canonPkgDir
      cfpTo   <- (</> to  ) <$> canonPkgDir
      renameFile cfpFrom cfpTo
+
+writeFile' :: PosixPath -> TL.Text -> CLI ()
+writeFile' name txt =
+  do cfp <- (</> name) <$> canonPkgDir
+     ofp <- (</> name) <$> origPkgDir
+     writeFile cfp (TL.encodeUtf8 txt)
+     info $ "Wrote " <> prettyAnsi ofp
 
 writeFreshFile' :: PosixPath -> TL.Text -> CLI ()
 writeFreshFile' name txt =

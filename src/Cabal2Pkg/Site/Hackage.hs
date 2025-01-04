@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE ViewPatterns #-}
 -- |Hackage recommends API users to use the hackage-security library
@@ -21,6 +22,7 @@ module Cabal2Pkg.Site.Hackage
     -- ** I/O
   , fetchAvailableVersions
   , fetchCabal
+  , fetchChangeLog
   ) where
 
 import Cabal2Pkg.CmdLine (CLI, info, fatal, hackageURI)
@@ -35,6 +37,7 @@ import Data.Aeson.TH qualified as ATH
 import Data.Aeson.Types (FromJSON(..), withObject)
 import Data.ByteString (ByteString)
 import Data.ByteString.Lazy (toStrict)
+import Data.ByteString.Lazy qualified as LBS
 import Data.Char (toLower)
 import Data.Conduit ((.|), ConduitT, yield)
 import Data.Conduit.Combinators (sinkLazy)
@@ -60,12 +63,12 @@ import Network.HTTP.Simple
   ( Response, getResponseBody, getResponseHeader, getResponseStatus
   , httpJSON, httpSource, parseRequest )
 import Network.HTTP.Types
-  ( hContentType, statusCode, statusMessage, statusIsSuccessful )
+  ( hContentType, statusCode, statusMessage, statusIsSuccessful, notFound404 )
 import Network.URI (URI(..), pathSegments, uriToString)
 import Network.URI.Lens (uriPathLens)
 import Prettyprinter qualified as PP
 import System.FilePath.Posix qualified as FP
-import System.OsPath.Posix (PosixPath)
+import System.OsPath.Posix (PosixPath, pstr)
 import System.OsPath.Posix qualified as OP
 
 
@@ -207,7 +210,7 @@ fetchAvailableVersions name =
                   , prettyShow name <> ".json"
                   ]
 
--- |Fetch a .cabal file from the Hackage for a given package.
+-- |Fetch a .cabal file from Hackage for a given package.
 fetchCabal :: HackageDist -> ConduitT i (PosixPath, ByteString) CLI ()
 fetchCabal (HackageDist name mVer) =
   do hackage <- lift hackageURI
@@ -240,24 +243,24 @@ fetchCabal (HackageDist name mVer) =
     getCabal :: MonadThrow m
              => Response (ConduitT i ByteString m ())
              -> ConduitT i ByteString m ()
-    getCabal res =
-      if statusIsSuccessful . getResponseStatus $ res then
-        case getResponseHeader hContentType res of
-          [cType]
-            | isCabal cType ->
-                getResponseBody res
-          ts ->
+    getCabal res
+      | statusIsSuccessful . getResponseStatus $ res =
+          case getResponseHeader hContentType res of
+            [cType]
+              | isCabal cType ->
+                  getResponseBody res
+            ts ->
+              fatal $ PP.hsep [ "Couldn't fetch a package description from Hackage:"
+                              , "Bad media type:"
+                              , PP.viaShow ts
+                              ]
+      | otherwise =
+          let sc = getResponseStatus res
+          in
             fatal $ PP.hsep [ "Couldn't fetch a package description from Hackage:"
-                            , "Bad media type:"
-                            , PP.viaShow ts
+                            , PP.pretty (statusCode sc)
+                            , PP.pretty (decodeUtf8Lenient . statusMessage $ sc)
                             ]
-      else
-        let sc = getResponseStatus res
-        in
-          fatal $ PP.hsep [ "Couldn't fetch a package description from Hackage:"
-                          , PP.pretty (statusCode sc)
-                          , PP.pretty (decodeUtf8Lenient . statusMessage $ sc)
-                          ]
 
     isCabal :: ByteString -> Bool
     isCabal cType =
@@ -265,4 +268,53 @@ fetchCabal (HackageDist name mVer) =
         Nothing -> False
         Just mt -> MT.mainType mt == "text"  &&
                    MT.subType  mt == "plain" &&
+                   elem (mt MT./. "charset") [Nothing, Just "utf-8"]
+
+-- |Fetch a ChangeLog file from Hackage for a given package. Yields nothing
+-- if it doesn't have one.
+fetchChangeLog :: HackageDist -> ConduitT i (PosixPath, LBS.ByteString) CLI ()
+fetchChangeLog (HackageDist name mVer) =
+  do hackage   <- lift hackageURI
+     req       <- parseRequest $ uriToString id (changeLogURI hackage) ""
+     httpSource req getChangeLog
+  where
+    changeLogURI :: URI -> URI
+    changeLogURI hackage =
+      hackage & uriPathLens %~ \base ->
+      FP.joinPath [ base
+                  , prettyShow name <> foldMap (("-" <>) . prettyShow) mVer
+                  , "changelog.txt"
+                  ]
+
+    getChangeLog :: MonadThrow m
+                 => Response (ConduitT i ByteString m ())
+                 -> ConduitT i (PosixPath, LBS.ByteString) m ()
+    getChangeLog res
+      | statusIsSuccessful . getResponseStatus $ res =
+          case getResponseHeader hContentType res of
+            [cType]
+              | isChangeLog cType ->
+                  do changeLog <- getResponseBody res .| sinkLazy
+                     yield ([pstr|changelog.txt|], changeLog)
+            ts ->
+              fatal $ PP.hsep [ "Couldn't fetch ChangeLog from Hackage:"
+                              , "Bad media type:"
+                              , PP.viaShow ts
+                              ]
+      | (== notFound404) . getResponseStatus $ res =
+          -- This is not an error. Some packages have no ChangeLog.
+          pure ()
+      | otherwise =
+          let sc = getResponseStatus res
+          in
+            fatal $ PP.hsep [ "Couldn't fetch ChangeLog from Hackage:"
+                            , PP.pretty (statusCode sc)
+                            , PP.pretty (decodeUtf8Lenient . statusMessage $ sc)
+                            ]
+
+    isChangeLog :: ByteString -> Bool
+    isChangeLog cType =
+      case MT.parseAccept cType of
+        Nothing -> False
+        Just mt -> MT.mainType mt == "text" &&
                    elem (mt MT./. "charset") [Nothing, Just "utf-8"]

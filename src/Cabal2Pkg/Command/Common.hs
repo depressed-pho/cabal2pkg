@@ -7,12 +7,12 @@ module Cabal2Pkg.Command.Common
   , shouldHaveHsPrefix
   ) where
 
-import Cabal2Pkg.Cabal (readCabal)
 import Cabal2Pkg.CmdLine (CLI, debug, info)
+import Cabal2Pkg.RawMeta (RawMeta(rmGPD), readRawMeta)
 import Cabal2Pkg.Pretty (prettyAnsi)
 import Cabal2Pkg.Site (PackageURI, renderPackageURI)
 import Cabal2Pkg.Extractor
-  ( PackageMeta, summariseCabal, hasLibraries, hasExecutables, hasForeignLibs )
+  ( PackageMeta(changeLog), summariseCabal, hasLibraries, hasExecutables, hasForeignLibs )
 import GHC.Stack (HasCallStack)
 import PackageInfo_cabal2pkg qualified as PI
 import Prettyprinter ((<+>), Doc)
@@ -42,13 +42,21 @@ fetchMeta uri =
                     , "and analysing its package description..."
                     ]
 
-     cabal <- readCabal uri
-     debug $ "Found a package description:\n" <> PP.pretty (ppShow cabal)
+     rawMeta <- readRawMeta uri
+     debug $ "Found a package description:\n" <> PP.pretty (ppShow . rmGPD $ rawMeta)
 
-     meta <- summariseCabal uri cabal
-     debug $ "Summarised package metadata:\n" <> PP.pretty (ppShow meta)
+     meta <- summariseCabal rawMeta
+     debug $ "Summarised package metadata:\n" <> PP.pretty (ppShow . stripChangeLog $ meta)
 
      pure meta
+
+-- Because no one would want to read lengthy ChangeLog even while
+-- debugging.
+stripChangeLog :: PackageMeta -> PackageMeta
+stripChangeLog pm =
+  case changeLog pm of
+    Nothing -> pm
+    Just _  -> pm { changeLog = Just "..." }
 
 --
 -- If the package only provides Haskell libraries but no executables or

@@ -12,7 +12,9 @@ author:             PHO
 maintainer:         pho@cielonegro.org
 category:           Distribution
 build-type:         Simple
-extra-doc-files:    CHANGELOG.md
+extra-doc-files:
+    CHANGELOG.md
+    README.md
 
 source-repository head
     type: git
@@ -39,7 +41,6 @@ executable cabal2pkg
         PackageInfo_cabal2pkg
 
     other-modules:
-        Cabal2Pkg.Cabal
         Cabal2Pkg.CmdLine
         Cabal2Pkg.Command.Common
         Cabal2Pkg.Command.Init
@@ -53,10 +54,12 @@ executable cabal2pkg
         Cabal2Pkg.Extractor.Dependency.Library
         Cabal2Pkg.Extractor.Dependency.PkgConfig
         Cabal2Pkg.Extractor.License
-        Cabal2Pkg.Generator.Makefile
         Cabal2Pkg.Generator.Buildlink3
+        Cabal2Pkg.Generator.CommitMsg
         Cabal2Pkg.Generator.Description
+        Cabal2Pkg.Generator.Makefile
         Cabal2Pkg.Pretty
+        Cabal2Pkg.RawMeta
         Cabal2Pkg.Site
         Cabal2Pkg.Site.Common
         Cabal2Pkg.Site.GitHub
@@ -76,6 +79,7 @@ executable cabal2pkg
     build-depends:
         Cabal                ^>= 3.10.2
       , Cabal-syntax         ^>= 3.10.2
+      , Diff                 ^>= 0.5
       , aeson                ^>= 2.2.1
       , ansi-terminal        ^>= 1.1.1
       , base                  == 4.*
