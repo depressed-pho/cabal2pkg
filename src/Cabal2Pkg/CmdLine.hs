@@ -207,9 +207,9 @@ optionsP noColor =
       (mconcat [ OA.long "colour"
                , OA.long "color"
                , OA.help $ mconcat
-                 [ "Use colours on output. WHEN can be \"never\", \"always\", or "
-                 , "\"auto\", where \"auto\" enables colours only when the stderr "
-                 , "is a terminal"
+                 [ "Use colours on output. WHEN can be \"never\", \"always\", or"
+                 , " \"auto\", where \"auto\" enables colours iff the stderr is"
+                 , " a terminal"
                  ]
                , OA.completeWith completeColourPref
                , OA.value (defaultColourPref noColor)
@@ -252,7 +252,7 @@ optionsP noColor =
       )
   <*> OA.option path
       (mconcat [ OA.long "ghc"
-               , OA.help "The path to the GHC executable"
+               , OA.help "The path to GHC executable"
                , OA.action "file"
                , OA.showDefault
                , OA.value Paths.ghc
@@ -260,7 +260,7 @@ optionsP noColor =
                ])
   <*> OA.option path
       (mconcat [ OA.long "make"
-               , OA.help "The path to the BSD make(1) command"
+               , OA.help "The path to BSD make(1) command"
                , OA.action "file"
                , OA.showDefault
                , OA.value $$makeQ
@@ -388,8 +388,7 @@ showMarkerStyle :: MarkerStyle -> String
 showMarkerStyle RCS   = "rcs"
 showMarkerStyle Diff3 = "diff3"
 
--- https://no-color.org/
--- FIXME: Document this env var
+-- |https://no-color.org/
 lookupNoColor :: MonadIO m => m Bool
 lookupNoColor =
   do nc <- liftIO $ lookupEnv "NO_COLOR"

@@ -20,7 +20,7 @@
 .Op option Ns ...
 .Cm update
 .Op Fl f Ns | Ns Fl \-force
-.Op Fl m Ns | Ns Fl \-merge Ns = Ns Ar STYLE
+.Op Fl m Ar STYLE Ns | Ns Fl \-merge Ns = Ns Ar STYLE
 .Op Ar PACKAGE-URI
 .\"
 .Sh DESCRIPTION
@@ -37,16 +37,180 @@ in that it downloads a distfile, extracts it, and generates package
 and other files, but it is specialised in Haskell packages and is intended
 to generate mostly complete
 .Pa Makefile
-including dependencies.
+including list of dependencies.
 .Pp
 .Nm
-can also update existing packages by performing 3-way merge on files. In
+can also update existing packages by performing 3-way merge on files.  In
 the update mode,
 .Nm
-fetches two package metadata at the current and the new version, and tries
-to apply differences between two versions against the current set of files.
+fetches two package metadata of the current and the updated version, and
+tries to apply differences between two versions against the current set of
+files.
+.Ss GLOBAL OPTIONS
+The following options are available for all subcommands:
+.Bl -tag -width indent
+.It Fl \-color Ns = Ns Ar WHEN , Fl \-colour Ns = Ns Ar WHEN
+Use colours on output.
+.Ar WHEN
+can be
+.Ql never ,
+.Ql always ,
+or
+.Ql auto ,
+where
+.Ql auto
+enables colours if and only if the standard error is a terminal (default:
+.Ql auto ) .
+.Pp
+The environment variable
+.Ev NO_COLOR
+affects the default state of output.  See
+.Sx ENVIRONMENT
+for details.
+.It Fl c , Fl \-commit\-msg
+Create a file named
+.Pa COMMIT_MSG
+in the package directory; (hopefully) suitable for committing changes to
+VCS.
+.Nm
+never commits changes automatically for you.  It is your responsibility to
+check if things are good to commit.
+.It Fl d , Fl \-debug
+Show debugging output that is only useful for debugging
+.Nm .
+.It Fl p Ar DIR , Fl \-pkgdir Ns = Ns Ar DIR
+The path to the pkgsrc package directory to work with (default:
+.Ql \&. ,
+i.e. the current directory).
+.It Fl f Ar FLAG , Fl \-flag Ns = Ns Ar FLAG
+Cabal package flags to apply, such as
+.Ql +foo -bar .
+This option can be arbitrarily repeated.  Using this option causes
+.Dv CONFIGURE_ARGS
+to appear in
+.Pa Makefile .
+For example,
+.Bd -literal -offset indent
+% cabal2pkg init foo-1.0 -f '+bar'
+.Ed
+.Pp
+Running the command above in a pkgsrc directory
+.Pa devel/foo
+downloads a Haskell package
+.Ql foo-1.0
+from Hackage and initialises the current directory with pkgsrc package
+files, whose
+.Pa Makefile
+containing the following line:
+.Bd -literal -offset indent
+CONFIGURE_ARGS+=	-f +bar
+.Ed
+.Pp
+Applying package flags affects conditionals in
+.Pa .cabal
+files.  Haskell packages can have optional dependencies that can be toggled
+with package flags.  Consider the following snippet of a package
+description:
+.Bd -literal -offset indent
+flag lua
+    description: Include support for scripting with Lua.
+    manual: True
+    default: False
+
+executable foo
+    build-depends: aeson ^>= 2.2.1,
+                   base   == 4.*
+    if flag(foo)
+        build-depends: lua ^>= 2.3.2
+.Ed
+.Pp
+This package builds and installs an executable named
+.Ql foo
+which only depends on packages
+.Ql aeson
+and
+.Ql base ,
+but when a flag
+.Ql lua
+is enabled it additionally depends on package
+.Ql lua .
+Without enabling this flag,
+.Nm
+would produce a
+.Pa Makefile
+like this:
+.Bd -literal -offset indent
+# $NetBSD$
+
+DISTNAME=	foo-1.0
+CATEGORIES=	devel
+
+# MAINTAINER, COMMENT, LICENSE, ...
+
+\&.include "../../converters/hs-aeson/buildlink3.mk"
+\&.include "../../mk/haskell.mk"
+\&.include "../../mk/bsd.pkg.mk"
+.Ed
+.Pp
+However, when the flag is enabled it instead produces something like this:
+.Bd -literal -offset indent
+# $NetBSD$
+
+DISTNAME=	foo-1.0
+CATEGORIES=	devel
+
+# MAINTAINER, COMMENT, LICENSE, ...
+
+CONFIGURE_ARGS+=	-f +lua
+
+\&.include "../../converters/hs-aeson/buildlink3.mk"
+\&.include "../../lang/hs-lua/buildlink3.mk"
+\&.include "../../mk/haskell.mk"
+\&.include "../../mk/bsd.pkg.mk"
+.Ed
+.It Fl \-ghc Ns = Ns Ar FILE
+The path to GHC executable.  This is mostly used for locating the
+Haskell package directory.  Its default value is determined at the
+build time.
+.It Fl \-make Ns = Ns Ar FILE
+The path to BSD
+.Xr make 1
+command.  Its default value is determined at the build time, and the
+environment variable
+.Ev MAKE
+affects it.  See
+.Sx ENVIRONMENT
+for details.
+.It Fl h , Fl \-help
+Display a help message.
+.It Fl \-version
+Display the version of
+.Nm .
+.El
 .\"
 .Sh ENVIRONMENT
+.Bl -tag -width indent
+.It Ev MAKE
+The name of, or the path to BSD
+.Xr make 1
+command to use.  If it's not defined
+.Ql bmake
+or
+.Ql make
+will be searched in the environment variable
+.Ev PATH ,
+with the former being preferred over the latter.  This variable only takes
+effect during the build time of
+.Nm .
+.It Ev NO_COLOR
+.Nm
+adopts the
+.Lk https://no-color.org/ NO_COLOR standard .
+When the variable is set to a non-empty string (regardless of the value),
+coloured output gets disabled by default.  The
+.Fl \-colour
+option can still override it.
+.El
 .\"
 .Sh FILES
 .\"
