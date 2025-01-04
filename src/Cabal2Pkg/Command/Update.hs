@@ -8,7 +8,7 @@ module Cabal2Pkg.Command.Update
 import Cabal2Pkg.CmdLine
   ( CLI, UpdateOptions(..), FlagMap, debug, fatal, info, warn, pkgPath, srcDb
   , distDir, canonPkgDir, origPkgDir, makeCmd, runMake, withPkgFlagsHidden
-  , withPkgFlagsModified, wantCommitMsg )
+  , withPkgFlagsModified, withMaintainer, withOwner, wantCommitMsg )
 import Cabal2Pkg.Command.Common
   ( command, option, fetchMeta, shouldHaveBuildlink3 )
 import Cabal2Pkg.Extractor (PackageMeta(distBase, distVersion, origin))
@@ -112,14 +112,14 @@ run opts@(UpdateOptions {..}) =
                       EQ             -> alreadyExact path ver
                       -- It's not but the user explicitly asked to do it.
                       LT | optForce  -> downgradeForced path ver pkgId >> cont pkgURI
-                         | otherwise -> downgradeRejected path ver pkgId
+                         | otherwise -> downgradeRefused path ver pkgId
                   Just Hackage.Deprecated ->
                     case ver `compare` pkgVersion pkgId of
                       GT | optForce  -> deprUpdateForced path ver >> cont pkgURI
-                      GT | otherwise -> deprUpdateRejected path ver
+                      GT | otherwise -> deprUpdateRefused path ver
                       EQ             -> alreadyExactDepr path ver
                       LT | optForce  -> deprDowngradeForced path ver pkgId >> cont pkgURI
-                         | otherwise -> deprDowngradeRejected path ver pkgId
+                         | otherwise -> deprDowngradeRefused path ver pkgId
                   Nothing ->
                     unavailable path ver
 
@@ -163,8 +163,8 @@ downgradeForced path ver pkgId =
                  , "Proceeding to downgrade it anyway because you explicitly asked to."
                  ]
 
-downgradeRejected :: HasCallStack => PosixPath -> Version -> PackageIdentifier -> CLI ()
-downgradeRejected path ver pkgId =
+downgradeRefused :: HasCallStack => PosixPath -> Version -> PackageIdentifier -> CLI ()
+downgradeRefused path ver pkgId =
   fatal $ PP.hsep [ "You requested to update"
                   , prettyAnsi path
                   , "to version"
@@ -188,8 +188,8 @@ deprUpdateForced path ver =
                  , "Proceeding to use this version anyway because you explicitly asked to."
                  ]
 
-deprUpdateRejected :: HasCallStack => PosixPath -> Version -> CLI ()
-deprUpdateRejected path ver =
+deprUpdateRefused :: HasCallStack => PosixPath -> Version -> CLI ()
+deprUpdateRefused path ver =
   fatal $ PP.hsep [ "You requested to update"
                   , prettyAnsi path
                   , "to version"
@@ -226,8 +226,8 @@ deprDowngradeForced path ver pkgId =
                  , "Proceeding to downgrade it to this version anyway because you explicitly asked to."
                  ]
 
-deprDowngradeRejected :: HasCallStack => PosixPath -> Version -> PackageIdentifier -> CLI ()
-deprDowngradeRejected path ver pkgId =
+deprDowngradeRefused :: HasCallStack => PosixPath -> Version -> PackageIdentifier -> CLI ()
+deprDowngradeRefused path ver pkgId =
   fatal $ PP.hsep [ "You requested to update"
                   , prettyAnsi path
                   , "to version"
@@ -263,8 +263,8 @@ noUpstreamForced path =
                  , "to empty because you explicitly asked to."
                  ]
 
-noUpstreamRejected :: HasCallStack => PosixPath -> CLI ()
-noUpstreamRejected path =
+noUpstreamRefused :: HasCallStack => PosixPath -> CLI ()
+noUpstreamRefused path =
   fatal $ PP.hsep [ "You requested to update"
                   , prettyAnsi path
                   , "with a tarball on the local file system."
@@ -299,12 +299,16 @@ examineNewMeta opts@(UpdateOptions {..}) pkg pkgId pkgURI =
           when hadMs $
             if optForce
             then noUpstreamForced path
-            else noUpstreamRejected path
-     oldFlags <- packageFlags pkg
+            else noUpstreamRefused path
+     mtr  <- SrcDb.maintainer pkg
+     owr  <- SrcDb.owner      pkg
      -- This is new metadata. Package flags on the command line should be
      -- merged into old ones found in Makefile. The former should have a
      -- higher precedence over the latter.
+     oldFlags <- packageFlags pkg
      newMeta  <- withPkgFlagsModified (<> oldFlags)
+                 . withMaintainer mtr
+                 . withOwner owr
                  $ fetchMeta pkgURI
      let cont = examineOldMeta opts pkg oldFlags newMeta
      case pkgURI of
@@ -317,7 +321,7 @@ examineNewMeta opts@(UpdateOptions {..}) pkg pkgId pkgURI =
              EQ             -> alreadyLatest path pkgId
              -- It's older but the user explicitly asked to do it.
              LT | optForce  -> downgradeForced path ver pkgId >> cont
-                | otherwise -> downgradeRejected path ver pkgId
+                | otherwise -> downgradeRefused path ver pkgId
 
 -- This is a continuation of 'examineNewMeta'. Obtain the package metadata
 -- of the current version somehow. If it's in Hackage we can just query the
@@ -344,14 +348,29 @@ examineOldMeta opts pkg oldFlags newMeta =
                                             ]
                   in
                     maybeM err pure $ reconstructPackageURI pkg
+     mtr       <- SrcDb.maintainer pkg
+     owr       <- SrcDb.owner      pkg
      -- As this is old metadata, no package flags on the command line
      -- arguments should be taken account of.
-     oldMeta   <-
-       withPkgFlagsHidden . withPkgFlagsModified (const oldFlags) $
-       if isFromHackage oldPkgURI then
-         fetchMeta oldPkgURI
-       else
-         fetchDistFile oldPkgURI
+     oldMeta   <- withPkgFlagsHidden
+                  . withPkgFlagsModified (const oldFlags)
+                  . withMaintainer mtr
+                  . withOwner owr
+                  $ if isFromHackage oldPkgURI then
+                      fetchMeta oldPkgURI
+                    else
+                      fetchDistFile oldPkgURI
+     -- Renaming packages is currently not supported. It will probably
+     -- never be.
+     when (distBase oldMeta /= distBase newMeta) . fatal $
+       PP.hsep [ "Package names don't match. You requested to update"
+               , prettyAnsi (distBase oldMeta)
+               , "with a different package"
+               , prettyAnsi (distBase newMeta) <> PP.dot
+               , "If you really need to rename a package, then sorry about that."
+               , command mempty
+               , "cannot do that."
+               ]
      applyChanges opts pkg oldMeta newMeta
   where
     fetchDistFile :: PackageURI -> CLI PackageMeta

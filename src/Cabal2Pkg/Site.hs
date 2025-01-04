@@ -92,12 +92,12 @@ parseUnknown ctx =
     -- moment.
   ]
   <> if isJust ctx then
-       [ PP.hsep [ "- the version to be retrieved from Hackage"
+       [ PP.hsep [ "- the version to retrieve from Hackage"
                  , eg "0.1.2"
                  ]
        ]
      else
-       [ PP.hsep [ "- the name of a package to be retrieved from Hackage,"
+       [ PP.hsep [ "- the name of a package to retrieve from Hackage,"
                  , "in the form of"
                  , PP.annotate styForm "NAME"
                  , eg "foo"

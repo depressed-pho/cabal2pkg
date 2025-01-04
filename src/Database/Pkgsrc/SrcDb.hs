@@ -30,9 +30,10 @@ module Database.Pkgsrc.SrcDb
   , pkgName
   , pkgVersionNoRev
   , pkgRevision
+  , masterSites
   , extractSufx
   , maintainer
-  , masterSites
+  , owner
   , configureArgs
 
     -- ** GitHub
@@ -110,9 +111,10 @@ data Package m
     , pPKGNAME           :: Deferred m Text
     , pPKGVERSION_NOREV  :: Deferred m Text
     , pPKGREVISION       :: Deferred m (Maybe Int)
-    , pEXTRACT_SUFX      :: Deferred m PosixString
-    , pMAINTAINER        :: Deferred m Text
     , pMASTER_SITES      :: Deferred m [URI]
+    , pEXTRACT_SUFX      :: Deferred m PosixString
+    , pMAINTAINER        :: Deferred m (Maybe Text)
+    , pOWNER             :: Deferred m (Maybe Text)
     , pGITHUB_PROJECT    :: Deferred m (Maybe Text)
     , pGITHUB_TAG        :: Deferred m (Maybe Text)
     , pGITHUB_RELEASE    :: Deferred m (Maybe Text)
@@ -363,9 +365,10 @@ scanPkgs makePath root catName =
                            , "PKGNAME"
                            , "PKGVERSION_NOREV"
                            , "PKGREVISION"
+                           , "MASTER_SITES"
                            , "EXTRACT_SUFX"
                            , "MAINTAINER"
-                           , "MASTER_SITES"
+                           , "OWNER"
                            , "GITHUB_PROJECT"
                            , "GITHUB_TAG"
                            , "GITHUB_RELEASE"
@@ -384,9 +387,10 @@ scanPkgs makePath root catName =
            , pPKGNAME           = get "PKGNAME"          text                <$> vars
            , pPKGVERSION_NOREV  = get "PKGVERSION_NOREV" text                <$> vars
            , pPKGREVISION       = get "PKGREVISION"      (optional int)      <$> vars
-           , pEXTRACT_SUFX      = get "EXTRACT_SUFX"     posixStr            <$> vars
-           , pMAINTAINER        = get "MAINTAINER"       text                <$> vars
            , pMASTER_SITES      = get "MASTER_SITES"     (many absURI)       <$> vars
+           , pEXTRACT_SUFX      = get "EXTRACT_SUFX"     posixStr            <$> vars
+           , pMAINTAINER        = get "MAINTAINER"       (optional text)     <$> vars
+           , pOWNER             = get "OWNER"            (optional text)     <$> vars
            , pGITHUB_PROJECT    = get "GITHUB_PROJECT"   (optional text)     <$> vars
            , pGITHUB_TAG        = get "GITHUB_TAG"       (optional text)     <$> vars
            , pGITHUB_RELEASE    = get "GITHUB_RELEASE"   (optional text)     <$> vars
@@ -518,14 +522,17 @@ pkgVersionNoRev = force . pPKGVERSION_NOREV
 pkgRevision :: MonadUnliftIO m => Package m -> m (Maybe Int)
 pkgRevision = force . pPKGREVISION
 
+masterSites :: MonadUnliftIO m => Package m -> m [URI]
+masterSites = force . pMASTER_SITES
+
 extractSufx :: MonadUnliftIO m => Package m -> m PosixString
 extractSufx = force . pEXTRACT_SUFX
 
-maintainer :: MonadUnliftIO m => Package m -> m Text
+maintainer :: MonadUnliftIO m => Package m -> m (Maybe Text)
 maintainer = force . pMAINTAINER
 
-masterSites :: MonadUnliftIO m => Package m -> m [URI]
-masterSites = force . pMASTER_SITES
+owner :: MonadUnliftIO m => Package m -> m (Maybe Text)
+owner = force . pOWNER
 
 gitHubProject :: MonadUnliftIO m => Package m -> m (Maybe Text)
 gitHubProject = force . pGITHUB_PROJECT

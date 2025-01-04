@@ -85,9 +85,13 @@ genAST pm
                    ])
              <> [ "CATEGORIES" .= categories pm ]
              <> genMasterSites pm
-             <> [ blank
-                , "MAINTAINER" .= pure (maintainer pm)
-                ]
+             <> [ blank ]
+             <> case owner pm of
+                  Just o  -> [ "OWNER" .= pure o ]
+                  Nothing ->
+                    case maintainer pm of
+                      Just m  -> [ "MAINTAINER" .= pure m ]
+                      Nothing -> mempty
              <> case homepage pm of
                   _ | isFromHackage (origin pm) ->
                         -- mk/haskell.mk has a good default for packages

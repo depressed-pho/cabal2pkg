@@ -1,15 +1,17 @@
+.\" =======================================================================
 .\" See mdoc(7) for the markup language used in this man page. It's grumpy,
 .\" as we all know, but it's the best language for writing man pages after
 .\" all. Yes we did try using pandoc to convert Markdown to man(7) but the
 .\" result wasn't very satisfactory.
+.\" =======================================================================
 .Dd January 4, 2025
 .Dt CABAL2PKG 8
 .Os
-.\"
+.\" =======================================================================
 .Sh NAME
 .Nm cabal2pkg
 .Nd automate importing/updating Haskell packages in pkgsrc
-.\"
+.\" =======================================================================
 .Sh SYNOPSIS
 .Nm
 .Op option Ns ...
@@ -22,7 +24,7 @@
 .Op Fl f Ns | Ns Fl \-force
 .Op Fl m Ar STYLE Ns | Ns Fl \-merge Ns = Ns Ar STYLE
 .Op Ar PACKAGE-URI
-.\"
+.\" =======================================================================
 .Sh DESCRIPTION
 .Nm
 is a tool to automate importing Haskell packages to
@@ -36,8 +38,11 @@ in that it downloads a distfile, extracts it, and generates package
 .Pa Makefile
 and other files, but it is specialised in Haskell packages and is intended
 to generate mostly complete
+.Pa Makefile .
+Conditional dependencies are also handled properly; packages that require
+different set of dependencies depending on platforms are represented with
 .Pa Makefile
-including list of dependencies.
+conditionals.
 .Pp
 .Nm
 can also update existing packages by performing 3-way merge on files.  In
@@ -46,6 +51,7 @@ the update mode,
 fetches two package metadata of the current and the updated version, and
 tries to apply differences between two versions against the current set of
 files.
+.\" -----------------------------------------------------------------------
 .Ss GLOBAL OPTIONS
 The following options are available for all subcommands:
 .Bl -tag -width indent
@@ -187,8 +193,119 @@ Display a help message.
 Display the version of
 .Nm .
 .El
-.\"
+.\" -----------------------------------------------------------------------
+.Ss SUBCOMMANDS
+.Bl -tag -width indent
+.It Cm init
+The
+.Cm init
+subcommand initialises the current directory (or whatever directory
+specified with
+.Fl p )
+with a newly created pkgsrc package.  This subcommand takes a single
+positional argument
+.Ar PACKAGE-URI
+specifying which Haskell package to import.  It can be one of the following
+forms:
+.Bl -dash
+.It
+.Li http://
+or
+.Li https://
+URL of a package tarball.  This is a preferred way of importing packages
+that are not registered to Hackage.  Archives on GitHub and GitLab are
+adequately accepted with special handling to their
+.Dv MASTER_SITES .
+.It
+.Li file://
+URL of a package tarball on the local filesystem.  This is mostly for
+debugging purpose and is generally unrecommended to use, because
+.Pa Makefile
+generated from a local tarball will not have
+.Dv MASTER_SITES .
+.It
+The name of a package to retrieve from Hackage, in the form of
+.Ar NAME
+or
+.Ar NAME Ns \- Ns Ar VERSION
+(e.g.\&
+.Li foo-0.1.2 ) .
+If the version is omitted, the latest available (and non-deprecated) one
+will be chosen.
+.El
+.Pp
+The
+.Cm init
+subcommand can additionally take the following options:
+.Bl -tag -width indent
+.It Fl w , Fl \-overwrite
+Allow the command to overwrite existing files.  Without this option it
+refuses to overwrite files, regardless of whether they have been modified
+after being generated.
+.El
+.It Cm update
+The
+.Cm update
+subcommand updates an existing package by merging differences between the
+current version and a newer one.  Since this is a 3-way merge, changes may
+conflict.  When that happens conflict markers will be left on files and you
+will have to resolve them.
+.Pp
+This subcommand optionally takes a single positional argument
+.Ar PACKAGE-URI
+specifying which Haskell package to update to.  Its syntax is almost the
+same as that of the
+.Cm init
+subcommand, but there is a single difference: a package to retrieve from
+Hackage needs to be specified with only a
+.Ar VERSION
+but not with a
+.Ar NAME .
+When this argument is omitted, the
+.Cm update
+subcommand attempts to retrieve the latest available (and non-deprecated)
+version from Hackage.
+.Pp
+The
+.Cm update
+subcommand can additionally take the following options:
+.Bl -tag -width indent
+.It Fl f , Fl \-force
+Perform the update forcefully.  Without this option the
+.Cm update
+subcommand refuses to update the package if any of the following conditions
+are met, and this option overrides the refusal:
+.Bl -dash -compact
+.It
+The given new version is actually older than the current one.
+.It
+The given new version has been marked as deprecated on Hackage.  This
+usually means that version has known defects and the upstream thinks it
+shouldn't be used.
+.It
+You are updating a package with a local tarball, which makes it lose
+its
+.Dv MASTER_SITES .
+.El
+.It Fl m Ar STYLE , Fl \-merge Ns = Ns Ar STYLE
+Choose the style of conflict markers.
+.Ar STYLE
+can either be
+.Ql rcs
+(RCS
+.Xr merge 1 )
+or
+.Ql diff3
+(GNU
+.Xr diff3 1 )
+(default:
+.Ql rcs ) .
+.El
+.El
+.\" =======================================================================
 .Sh ENVIRONMENT
+The following environment variables affect the behaviour of
+.Nm :
 .Bl -tag -width indent
 .It Ev MAKE
 The name of, or the path to BSD
@@ -210,18 +327,29 @@ When the variable is set to a non-empty string (regardless of the value),
 coloured output gets disabled by default.  The
 .Fl \-colour
 option can still override it.
+.It Ev PKGMAINTAINER , Ev REPLYTO
+The default value of
+.Dv MAINTAINER
+in
+.Pa Makefile .
+Only used by the subcommand
+.Cm init .
+.Cm update
+inherits whatever set in the current
+.Pa Makefile .
 .El
-.\"
+.\" =======================================================================
 .Sh FILES
-.\"
+.\" =======================================================================
 .Sh EXAMPLES
-.\"
+.\" =======================================================================
 .Sh EXIT STATUS
-.\"
+.\" =======================================================================
 .Sh SEE ALSO
-.\"
+.\" =======================================================================
 .Sh HISTORY
-.\"
+.\" =======================================================================
 .Sh AUTHORS
-.\"
+.\" =======================================================================
 .Sh BUGS
+.\" =======================================================================

@@ -25,9 +25,10 @@ module Cabal2Pkg.CmdLine
   , pkgPath
   , origPkgDir
   , canonPkgDir
-  , maintainer
   , makeCmd
   , pkgFlags
+  , maintainer
+  , owner
   , showPkgFlags
   , progDb
   , ghcVersion
@@ -41,6 +42,8 @@ module Cabal2Pkg.CmdLine
     -- * Modifying the context
   , withPkgFlagsHidden
   , withPkgFlagsModified
+  , withMaintainer
+  , withOwner
 
     -- * Message output
   , debug
@@ -192,6 +195,8 @@ data Context
     , _ctxUseColour   :: !Bool
       -- ^Display flags defined in .cabal files.
     , _ctxShowFlags   :: !Bool
+    , _ctxMaintainer  :: !(Maybe Text)
+    , _ctxOwner       :: !(Maybe Text)
     , _ctxCanonPkgDir :: !(Deferred CLI PosixPath)
     , _ctxProgDb      :: !(Deferred CLI ProgramDb)
     , _ctxIPI         :: !(Deferred CLI InstalledPackageIndex)
@@ -427,6 +432,7 @@ initialCtx opts
                   Always -> pure True
                   Never  -> pure False
                   Auto   -> liftIO $ hNowSupportsANSI stderr
+       mtr   <- mkMaintainer
        pDir  <- defer mkCanonPkgDir
        progs <- defer mkProgDb
        ipi   <- defer readPkgDb
@@ -435,11 +441,22 @@ initialCtx opts
          { _ctxOptions     = opts
          , _ctxUseColour   = col
          , _ctxShowFlags   = True
+         , _ctxMaintainer  = Just mtr
+         , _ctxOwner       = Nothing
          , _ctxCanonPkgDir = pDir
          , _ctxProgDb      = progs
          , _ctxIPI         = ipi
          , _ctxSrcDb       = sdb
          }
+
+mkMaintainer :: MonadIO m => m Text
+mkMaintainer =
+  do m0 <- liftIO $ lookupEnv "PKGMAINTAINER"
+     m1 <- liftIO $ lookupEnv "REPLYTO"
+     pure $ maybe defaultMaintainer T.pack (m0 <|> m1)
+  where
+    defaultMaintainer :: Text
+    defaultMaintainer = "pkgsrc-users@NetBSD.org"
 
 mkCanonPkgDir :: CLI PosixPath
 mkCanonPkgDir =
@@ -543,18 +560,17 @@ pkgBase = OP.takeFileName <$> canonPkgDir
 pkgCategory :: CLI PosixPath
 pkgCategory = OP.takeFileName . OP.takeDirectory <$> canonPkgDir
 
-maintainer :: CLI (Maybe Text)
-maintainer =
-  -- FIXME: Document these env vars
-  do m0 <- liftIO $ lookupEnv "PKGMAINTAINER"
-     m1 <- liftIO $ lookupEnv "REPLYTO"
-     pure $ T.pack <$> (m0 <|> m1)
-
 makeCmd :: CLI PosixPath
 makeCmd = (^. optMakeCmd) <$> options
 
 pkgFlags :: CLI FlagMap
 pkgFlags = (^. optPkgFlags) <$> options
+
+maintainer :: CLI (Maybe Text)
+maintainer = CLI $ asks (^. ctxMaintainer)
+
+owner :: CLI (Maybe Text)
+owner = CLI $ asks (^. ctxOwner)
 
 showPkgFlags :: CLI Bool
 showPkgFlags = CLI $ asks (^. ctxShowFlags)
@@ -625,6 +641,18 @@ withPkgFlagsModified f = CLI . local g . unCLI
   where
     g :: Context -> Context
     g = ctxOptions . optPkgFlags %~ f
+
+withMaintainer :: Maybe Text -> CLI a -> CLI a
+withMaintainer m = CLI . local g . unCLI
+  where
+    g :: Context -> Context
+    g = ctxMaintainer .~ m
+
+withOwner :: Maybe Text -> CLI a -> CLI a
+withOwner o = CLI . local g . unCLI
+  where
+    g :: Context -> Context
+    g = ctxOwner .~ o
 
 -- |Print a debugging message to 'stderr'. The message should not end with
 -- a linebreak.

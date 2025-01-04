@@ -15,7 +15,6 @@ import Cabal2Pkg.Extractor.License (extractLicense)
 import Cabal2Pkg.RawMeta (RawMeta(..))
 import Cabal2Pkg.Site (PackageURI)
 import Data.Data (Data)
-import Data.Maybe (fromMaybe)
 import Data.Set (Set)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -40,7 +39,8 @@ data PackageMeta = PackageMeta
   , categories  :: ![Text]
     -- ^Basically represents @MASTER_SITES@
   , origin      :: !PackageURI
-  , maintainer  :: !Text
+  , maintainer  :: !(Maybe Text)
+  , owner       :: !(Maybe Text)
   , homepage    :: !Text
   , comment     :: !Text
   , description :: !Text
@@ -61,6 +61,7 @@ summariseCabal rawMeta
        base     <- (T.pack <$>) . OP.decodeUtf =<< CLI.pkgBase
        cat      <- (T.pack <$>) . OP.decodeUtf =<< CLI.pkgCategory
        mtr      <- CLI.maintainer
+       owr      <- CLI.owner
        fs       <- CLI.pkgFlags
        (cs, ts) <- extractComponents gpd
        pure PackageMeta
@@ -70,7 +71,8 @@ summariseCabal rawMeta
          , pkgPath     = path
          , categories  = [cat]
          , origin      = rmPackageURI rawMeta
-         , maintainer  = fromMaybe "pkgsrc-users@NetBSD.org" mtr
+         , maintainer  = mtr
+         , owner       = owr
          , homepage    = T.pack . ST.fromShortText . PD.homepage $ pd
          , comment     = T.pack . ST.fromShortText . PD.synopsis $ pd
          , description = extractDescription pd
