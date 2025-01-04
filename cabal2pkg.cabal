@@ -1,7 +1,7 @@
 cabal-version:      3.4
 name:               cabal2pkg
 version:            0.1.0.0
-synopsis:           A tool to automate importing Cabal packages to pkgsrc
+synopsis:           A tool to automate importing/updating Haskell packages in pkgsrc
 description:
     FIXME - description forthcoming
 homepage:           https://github.com/depressed-pho/cabal2pkg
@@ -12,6 +12,8 @@ author:             PHO
 maintainer:         pho@cielonegro.org
 category:           Distribution
 build-type:         Simple
+extra-source-files:
+    doc/cabal2pkg.8
 extra-doc-files:
     CHANGELOG.md
     README.md

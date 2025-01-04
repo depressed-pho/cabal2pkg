@@ -1,0 +1,63 @@
+.\" See mdoc(7) for the markup language used in this man page. It's grumpy,
+.\" as we all know, but it's the best language for writing man pages after
+.\" all. Yes we did try using pandoc to convert Markdown to man(7) but the
+.\" result wasn't very satisfactory.
+.Dd January 4, 2025
+.Dt CABAL2PKG 8
+.Os
+.\"
+.Sh NAME
+.Nm cabal2pkg
+.Nd automate importing/updating Haskell packages in pkgsrc
+.\"
+.Sh SYNOPSIS
+.Nm
+.Op option Ns ...
+.Cm init
+.Op Fl w Ns | Ns Fl \-overwrite
+.Ar PACKAGE-URI
+.Nm
+.Op option Ns ...
+.Cm update
+.Op Fl f Ns | Ns Fl \-force
+.Op Fl m Ns | Ns Fl \-merge Ns = Ns Ar STYLE
+.Op Ar PACKAGE-URI
+.\"
+.Sh DESCRIPTION
+.Nm
+is a tool to automate importing Haskell packages to
+.Xr pkgsrc
+and updating existing Haskell packages in
+.Xr pkgsrc .
+.Nm
+is similar to
+.Xr url2pkg 8 ,
+in that it downloads a distfile, extracts it, and generates package
+.Pa Makefile
+and other files, but it is specialised in Haskell packages and is intended
+to generate mostly complete
+.Pa Makefile
+including dependencies.
+.Pp
+.Nm
+can also update existing packages by performing 3-way merge on files. In
+the update mode,
+.Nm
+fetches two package metadata at the current and the new version, and tries
+to apply differences between two versions against the current set of files.
+.\"
+.Sh ENVIRONMENT
+.\"
+.Sh FILES
+.\"
+.Sh EXAMPLES
+.\"
+.Sh EXIT STATUS
+.\"
+.Sh SEE ALSO
+.\"
+.Sh HISTORY
+.\"
+.Sh AUTHORS
+.\"
+.Sh BUGS
