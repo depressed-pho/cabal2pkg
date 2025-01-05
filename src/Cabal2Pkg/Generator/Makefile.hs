@@ -83,7 +83,9 @@ genAST pm
                                         else
                                           "${DISTNAME:tl}")
                    ])
-             <> [ "CATEGORIES" .= categories pm ]
+             <> case categories pm of
+                  []   -> [ "CATEGORIES" .= mempty # "TODO" ]
+                  cats -> [ "CATEGORIES" .= cats ]
              <> genMasterSites pm
              <> [ blank ]
              <> case owner pm of

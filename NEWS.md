@@ -1,5 +1,9 @@
 # Revision history for cabal2pkg
 
+## 0.1.0.2 -- not released yet
+
+* Leave a TODO mark on `CATEGORIES` if it's `wip`.
+
 ## 0.1.0.1 -- 2025-01-05
 
 * Better generation of `COMMENT`: now the leading "a" or "an" is dropped,

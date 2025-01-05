@@ -72,7 +72,7 @@ summariseCabal rawMeta
          , distVersion = C.pkgVersion . PD.package $ pd
          , pkgBase     = base
          , pkgPath     = path
-         , categories  = [cat]
+         , categories  = [cat | cat /= "wip"]
          , origin      = rmPackageURI rawMeta
          , maintainer  = mtr
          , owner       = owr

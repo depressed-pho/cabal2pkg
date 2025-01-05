@@ -1,6 +1,6 @@
 cabal-version:      3.4
 name:               cabal2pkg
-version:            0.1.0.1
+version:            0.1.0.2
 synopsis:           A tool to automate importing/updating Haskell packages in pkgsrc
 description:
     @cabal2pkg@ is a tool to automate importing Haskell packages to pkgsrc
