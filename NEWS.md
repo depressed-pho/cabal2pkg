@@ -1,5 +1,10 @@
 # Revision history for cabal2pkg
 
+## 0.1.0.3 -- 2025-01-05
+
+* Fix an incorrect error message that is shown when updating a wip package
+  is attempted. It is unsupported for a technical reason at the moment.
+
 ## 0.1.0.2 -- 2025-01-05
 
 * Leave a TODO mark on `CATEGORIES` if it's `wip`.
