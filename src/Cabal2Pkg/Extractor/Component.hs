@@ -37,8 +37,7 @@ import Distribution.Types.LibraryName qualified as C
 import Distribution.Types.PackageDescription qualified as C
 import Distribution.Types.PackageId qualified as C
 import Distribution.Types.UnqualComponentName qualified as C
-import Lens.Micro ((^.), to)
-import Lens.Micro.TH (makeLenses)
+import Lens.Micro.Platform ((^.), makeLenses, to)
 import Prettyprinter ((<+>), Doc)
 import Prettyprinter qualified as PP
 import UnliftIO.Async (Conc)

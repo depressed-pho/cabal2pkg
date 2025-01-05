@@ -14,7 +14,10 @@ import Cabal2Pkg.Extractor.Component
 import Cabal2Pkg.Extractor.License (extractLicense)
 import Cabal2Pkg.RawMeta (RawMeta(..))
 import Cabal2Pkg.Site (PackageURI)
+import Data.CaseInsensitive as CI
+import Data.Char (toTitle)
 import Data.Data (Data)
+import Data.List.Extra (drop1)
 import Data.Set (Set)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -27,7 +30,7 @@ import Distribution.Types.PackageId qualified as C
 import Distribution.Types.PackageName (PackageName)
 import Distribution.Types.Version (Version)
 import Distribution.Utils.ShortText qualified as ST
-import Lens.Micro ((^.))
+import Lens.Micro.Platform ((^.), (^?), (%~), _head, to)
 import System.OsPath.Posix qualified as OP
 
 
@@ -74,7 +77,7 @@ summariseCabal rawMeta
          , maintainer  = mtr
          , owner       = owr
          , homepage    = T.pack . ST.fromShortText . PD.homepage $ pd
-         , comment     = T.pack . ST.fromShortText . PD.synopsis $ pd
+         , comment     = extractComment pd
          , description = extractDescription pd
          , license     = extractLicense pd
          , changeLog   = rmChangeLog rawMeta
@@ -88,6 +91,32 @@ summariseCabal rawMeta
 
     pd :: PackageDescription
     pd = GPD.packageDescription gpd
+
+extractComment :: PackageDescription -> Text
+extractComment =
+  dropPeriod
+  . capitaliseHead
+  . dropArticle
+  . T.pack . ST.fromShortText . PD.synopsis
+  where
+    dropArticle :: Text -> Text
+    dropArticle comm =
+      case comm ^? to T.words . _head . to CI.mk of
+        Just w | w == "A" || w == "An" ->
+          -- This is an English indefinite article. Drop it and
+          -- capitalise the next word.
+          T.unwords . drop1 . T.words $ comm
+        _ ->
+          comm
+
+    capitaliseHead :: Text -> Text
+    capitaliseHead = _head %~ toTitle
+
+    dropPeriod :: Text -> Text
+    dropPeriod comm =
+      case T.unsnoc comm of
+        Just (comm', '.') -> comm'
+        _                 -> comm
 
 extractDescription :: PackageDescription -> Text
 extractDescription pd =

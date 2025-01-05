@@ -20,10 +20,10 @@ import Prelude hiding (lines, words)
 import Prettyprinter ((<+>), Doc, LayoutOptions(..), PageWidth(..))
 import Prettyprinter qualified as PP
 import Prettyprinter.Render.Text (renderLazy)
-{-
-import Debug.Trace (traceWith)
-import Text.Show.Pretty (ppShow)
--}
+
+-- import Debug.Trace (traceWith)
+-- import Text.Show.Pretty (ppShow)
+
 
 genDESCR :: HasCallStack => PackageMeta -> TL.Text
 genDESCR = (<> "\n")
@@ -107,10 +107,11 @@ plainTextMarkup fromMod fromId =
     append (x:xs) ys     = x : append xs ys
 
     text :: Text -> [Doc ann]
-    text = (wrap <$>) . T.lines
+    text = (wrap <$>) . T.split (== '\n')
       where
         -- Lines may contain leading or trailing spaces, and we must
-        -- preserve them.
+        -- preserve them. Also using T.split instead of T.lines for the
+        -- same reason.
         wrap :: Text -> Doc ann
         wrap txt =
           let pfx   = T.takeWhile isSpace txt

@@ -21,7 +21,7 @@ import Language.BMake.AST
   ( Makefile(..), Block(..), Directive(..), (#), (.+=), (.?=)
   , (.:=), blank, prettyPrintAST )
 import Language.BMake.AST qualified as AST
-import Lens.Micro ((^.), (.~), (%~), to)
+import Lens.Micro.Platform ((^.), (.~), (%~), to)
 
 
 genBuildlink3 :: HasCallStack => PackageMeta -> TL.Text

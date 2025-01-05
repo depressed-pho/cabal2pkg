@@ -24,7 +24,7 @@ import Data.Maybe (fromMaybe, isJust)
 import Database.Pkgsrc.SrcDb (Package)
 import Database.Pkgsrc.SrcDb qualified as SrcDb
 import Distribution.Types.PackageName (PackageName)
-import Lens.Micro ((&), (%~))
+import Lens.Micro.Platform ((&), (%~))
 import Network.URI (URI(..))
 import Network.URI.Lens (uriPathLens)
 import PackageInfo_cabal2pkg qualified as PI

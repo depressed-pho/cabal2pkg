@@ -9,4 +9,5 @@ clean:
 PAGER?= less
 .PHONY: lint
 lint:
+	cabal check | ${PAGER}
 	hlint src --color=always -j | ${PAGER}

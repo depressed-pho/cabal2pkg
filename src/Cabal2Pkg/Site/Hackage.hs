@@ -57,7 +57,7 @@ import Distribution.Types.PackageId (PackageIdentifier(pkgName, pkgVersion))
 import Distribution.Types.PackageName (PackageName)
 import Distribution.Types.Version (Version)
 import GHC.Stack (HasCallStack)
-import Lens.Micro ((&), (%~))
+import Lens.Micro.Platform ((&), (%~))
 import Network.HTTP.Media qualified as MT
 import Network.HTTP.Simple
   ( Response, getResponseBody, getResponseHeader, getResponseStatus

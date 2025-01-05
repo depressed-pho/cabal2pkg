@@ -26,7 +26,7 @@ import Database.Pkgsrc.SrcDb qualified as SrcDb
 import Distribution.Pretty (prettyShow)
 import Distribution.Types.Version (Version)
 import Language.BMake.AST ((.=), Block(..))
-import Lens.Micro ((%~))
+import Lens.Micro.Platform ((%~))
 import Network.URI (URI, pathSegments)
 import Network.URI.Lens (uriPathLens)
 import System.FilePath.Posix qualified as FP

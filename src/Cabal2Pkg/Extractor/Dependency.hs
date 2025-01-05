@@ -21,7 +21,7 @@ import Distribution.Types.PackageDescription qualified as C
 import Distribution.Types.PackageId qualified as C
 import GHC.Generics (Generic, Generically(..))
 import UnliftIO.Async (Conc, conc)
-import Lens.Micro.TH (makeLenses)
+import Lens.Micro.Platform (makeLenses)
 
 
 -- |A set of various kinds of dependencies, such as tool dependencies,

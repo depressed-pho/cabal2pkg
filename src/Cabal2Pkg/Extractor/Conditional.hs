@@ -31,8 +31,7 @@ import GHC.Generics (Generic, Generically(..))
 import GHC.Stack (HasCallStack)
 import Language.BMake.AST ((?==))
 import Language.BMake.AST qualified as AST
-import Lens.Micro ((&), (^.), (%~), (.~))
-import Lens.Micro.TH (makeLenses)
+import Lens.Micro.Platform ((&), (^.), (%~), (.~), makeLenses)
 import UnliftIO.Async (Conc, runConc)
 
 class Simplifiable a where

@@ -26,7 +26,7 @@ import Database.Pkgsrc.SrcDb qualified as SrcDb
 import Distribution.Pretty (prettyShow)
 import Distribution.Types.Version (Version)
 import Language.BMake.AST ((.=), Block(..))
-import Lens.Micro ((%~))
+import Lens.Micro.Platform ((%~))
 import Network.URI (URI, pathSegments)
 import Network.URI.Lens (uriPathLens)
 import System.FilePath.Posix qualified as FP
@@ -141,7 +141,11 @@ genGitHubMasterSites pkgBase ver dist =
   <> case dist of
        Tag {..}
          | ghTag == ver' -> [] -- Use the default value.
-         | otherwise     -> [ "GITHUB_TAG" .= [T.replace ver' "${PKGVERSION_NOREV}" ghTag] ]
+         | otherwise     ->
+             [ "GITHUB_TAG" .= [T.replace ver' "${PKGVERSION_NOREV}" ghTag] ]
+             <> [ "WRKSRC"  .= pure "${WRKDIR}/${GITHUB_PROJECT}-${PKGVERSION_NOREV}"
+                | "refs/tags/" `T.isPrefixOf` ghTag
+                ]
        Release {..} ->
          [ "GITHUB_RELEASE" .= pure ghRelease ]
   where

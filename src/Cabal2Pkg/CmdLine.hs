@@ -94,8 +94,7 @@ import GHC.Paths.PosixPath qualified as Paths
 import Network.URI (URI, parseAbsoluteURI, parseURIReference)
 import Options.Applicative (Parser, ParserInfo, ParserPrefs, ReadM)
 import Options.Applicative qualified as OA
-import Lens.Micro ((^.), (.~), (%~), to)
-import Lens.Micro.TH (makeLenses)
+import Lens.Micro.Platform ((^.), (.~), (%~), makeLenses, to)
 import PackageInfo_cabal2pkg qualified as PI
 import Prelude hiding (print)
 import Prettyprinter ((<+>), Doc)

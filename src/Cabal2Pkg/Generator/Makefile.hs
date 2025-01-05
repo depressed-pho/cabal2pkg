@@ -36,7 +36,7 @@ import Language.BMake.AST
   ( Makefile(..), Block(..), Directive(..), (#), (.=), (.+=), blank, include
   , prettyPrintAST )
 import Language.BMake.AST qualified as AST
-import Lens.Micro ((&), (^.), (%~), (.~), to)
+import Lens.Micro.Platform ((&), (^.), (%~), (.~), to)
 import Network.URI (uriToString)
 import Network.URI.Lens (uriPathLens)
 import System.FilePath.Posix qualified as FP
@@ -370,7 +370,7 @@ genExeDepsAST es
 
 genExtLibDepAST :: ExtLibDep -> Makefile
 genExtLibDepAST (ExtLibDep name)
-  = Makefile [ blank # "TODO: Include buildlink3.mk for lib" <> name ]
+  = Makefile [ blank # "TODO: Include buildlink3.mk for " <> name ]
 
 genLibDepAST :: PackageMeta -> ComponentMeta -> LibDep -> Makefile
 genLibDepAST pm cm (KnownLib {..})
@@ -388,7 +388,7 @@ genLibDepAST pm cm (KnownLib {..})
   | otherwise
       = Makefile [ include $ "../../" <> pkgPath <> "/buildlink3.mk" ]
 genLibDepAST _ _ (UnknownLib {..})
-  = Makefile [ blank # "TODO: Include buildlink3.mk for " <> name ]
+  = Makefile [ blank # "TODO: Package \"" <> name <> "\" and include its buildlink3.mk" ]
 
 genPkgConfDepAST :: PkgConfDep -> Makefile
 genPkgConfDepAST (PkgConfDep name)
