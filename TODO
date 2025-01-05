@@ -1,3 +1,4 @@
 # -*- org -*-
 
 * DONE [#A] =cabal update= should try to extract ChangeLog entries
+* TODO [#A] Automate generating README.md; it is currently done manually
