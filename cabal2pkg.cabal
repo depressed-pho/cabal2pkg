@@ -26,7 +26,7 @@ build-type:         Simple
 extra-source-files:
     doc/cabal2pkg.8
 extra-doc-files:
-    CHANGELOG.md
+    NEWS.md
     README.md
 
 source-repository head
