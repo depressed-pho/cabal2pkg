@@ -1,6 +1,6 @@
 # Revision history for cabal2pkg
 
-## 0.1.0.2 -- not released yet
+## 0.1.0.2 -- 2025-01-05
 
 * Leave a TODO mark on `CATEGORIES` if it's `wip`.
 * Fix an issue with `PACKAGE-URI` in the `init` subcommand where a bareword
