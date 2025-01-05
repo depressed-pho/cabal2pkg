@@ -4,8 +4,8 @@
 
 * Leave a TODO mark on `CATEGORIES` if it's `wip`.
 * Fix an issue with `PACKAGE-URI` in the `init` subcommand where a bareword
-  package name without version are is misinterpreted as a package
-  identifier with a null version.
+  package name without version is misinterpreted as a package identifier
+  with a null version.
 
 ## 0.1.0.1 -- 2025-01-05
 
