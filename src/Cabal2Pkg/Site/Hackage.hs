@@ -55,7 +55,7 @@ import Distribution.Parsec (eitherParsec)
 import Distribution.Pretty (prettyShow)
 import Distribution.Types.PackageId (PackageIdentifier(pkgName, pkgVersion))
 import Distribution.Types.PackageName (PackageName)
-import Distribution.Types.Version (Version)
+import Distribution.Types.Version (Version, nullVersion)
 import GHC.Stack (HasCallStack)
 import Lens.Micro.Platform ((&), (%~))
 import Network.HTTP.Media qualified as MT
@@ -110,16 +110,15 @@ parseHTTPURI uri = go <$> hackageURI
 parseHackageURI :: MonadThrow m => Maybe PackageName -> URI -> m (Maybe HackageDist)
 parseHackageURI Nothing (uriPath -> path) =
   case eitherParsec path of
-    Right pkgId ->
-      -- It's a full package ID, i.e. NAME-VERSION
-      pure . Just $ HackageDist (pkgName pkgId) (Just $ pkgVersion pkgId)
-    Left _ ->
-      case eitherParsec path of
-        Right name ->
+    Right pkgId
+      | pkgVersion pkgId == nullVersion ->
           -- It's a package name without version
-          pure . Just $ HackageDist name Nothing
-        Left _ ->
-          pure Nothing
+          pure . Just $ HackageDist (pkgName pkgId) Nothing
+      | otherwise ->
+          -- It's a full package ID, i.e. NAME-VERSION
+          pure . Just $ HackageDist (pkgName pkgId) (Just $ pkgVersion pkgId)
+    Left _ ->
+      pure Nothing
 parseHackageURI (Just name) (uriPath -> path) =
   case eitherParsec path of
     Right ver ->
