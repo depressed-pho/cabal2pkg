@@ -1,5 +1,10 @@
 # Revision history for cabal2pkg
 
+## 0.1.0.4 -- 2025-01-09
+
+* Fixed an issue where setting a command name (as opposed to a command
+  path) to `MAKE` during build causes it to be searched from `PATH`.
+
 ## 0.1.0.3 -- 2025-01-05
 
 * Fix an incorrect error message that is shown when updating a wip package

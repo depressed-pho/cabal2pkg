@@ -23,10 +23,14 @@ makeQ = Code $ getMake >>= examineCode . liftTyped
            case m0 of
              Just p0 ->
                do p0' <- findExecutable =<< OP.encodeUtf p0
-                  maybe
-                    (fail $ "The environment variable MAKE is set to `"
-                            <> p0 <> "' but it is not found")
-                    pure p0'
+                  case p0' of
+                    Nothing ->
+                      fail $ mconcat [ "The environment variable MAKE is set to `"
+                                     , p0
+                                     , "' but it is not found"
+                                     ]
+                    Just _ ->
+                      OP.encodeUtf p0 -- p0, not p0'. This isn't a mistake.
              Nothing ->
                do m1 <- findExecutable =<< OP.encodeUtf "bmake"
                   m2 <- findExecutable =<< OP.encodeUtf "make"
