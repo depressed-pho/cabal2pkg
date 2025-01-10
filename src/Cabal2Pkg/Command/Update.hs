@@ -10,7 +10,7 @@ import Cabal2Pkg.CmdLine
   , distDir, canonPkgDir, origPkgDir, makeCmd, runMake, withPkgFlagsHidden
   , withPkgFlagsModified, withMaintainer, withOwner, wantCommitMsg )
 import Cabal2Pkg.Command.Common
-  ( command, option, fetchMeta, shouldHaveBuildlink3 )
+  ( command, command', option, fetchMeta, shouldHaveBuildlink3, warnOutdated )
 import Cabal2Pkg.Extractor (PackageMeta(distBase, distVersion, origin))
 import Cabal2Pkg.Generator.Buildlink3 (genBuildlink3)
 import Cabal2Pkg.Generator.CommitMsg (genUpdateMsg)
@@ -316,6 +316,7 @@ examineNewMeta opts@(UpdateOptions {..}) pkg pkgId pkgURI =
                  . withMaintainer mtr
                  . withOwner owr
                  $ fetchMeta pkgURI
+     warnOutdated newMeta
      let cont = examineOldMeta opts pkg oldFlags newMeta
      case pkgURI of
        Hackage {} -> cont
@@ -349,7 +350,7 @@ examineOldMeta opts pkg oldFlags newMeta =
   do path      <- pkgPath
      oldPkgURI <- let err = fatal $ PP.hsep [ prettyAnsi path
                                             , "has no MASTER_SITES."
-                                            , command mempty
+                                            , command'
                                             , "cannot figure out how to update this package."
                                             ]
                   in
@@ -374,7 +375,7 @@ examineOldMeta opts pkg oldFlags newMeta =
                , "with a different package"
                , prettyAnsi (distBase newMeta) <> PP.dot
                , "If you really need to rename a package, then sorry about that."
-               , command mempty
+               , command'
                , "cannot do that."
                ]
      applyChanges opts pkg oldMeta newMeta
@@ -423,7 +424,7 @@ applyChanges (UpdateOptions {..}) pkg oldMeta newMeta =
                                  (labelBase, base)
                                  (labelNew , new )
               if merged == cur
-                then info $ prettyAnsi name <+> "needs no changes"
+                then info $ prettyAnsi name <+> "needs no changes."
                 else do name' <- OP.decodeUtf name
                         debug $ mconcat [ "Merged" <+> PP.pretty name'
                                         , ":\n"
@@ -495,7 +496,7 @@ applyChanges (UpdateOptions {..}) pkg oldMeta newMeta =
      mk <- readFile' [pstr|Makefile|]
      if hasMarkers mk
        then do make <- T.pack <$> (OP.decodeUtf . OP.takeFileName =<< makeCmd)
-               warn $ PP.hsep [ command mempty
+               warn $ PP.hsep [ command'
                               , "cannot update"
                               , prettyAnsi [pstr|distinfo|]
                               , "because there are unresolved conflicts in"

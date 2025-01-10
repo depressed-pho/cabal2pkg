@@ -1,24 +1,36 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards #-}
 module Cabal2Pkg.Command.Common
   ( command
+  , command'
   , option
+
   , fetchMeta
   , shouldHaveBuildlink3
   , shouldHaveHsPrefix
+  , warnOutdated
   ) where
 
-import Cabal2Pkg.CmdLine (CLI, debug, info)
-import Cabal2Pkg.RawMeta (RawMeta(rmGPD), readRawMeta)
-import Cabal2Pkg.Pretty (prettyAnsi)
-import Cabal2Pkg.Site (PackageURI, renderPackageURI)
+import Cabal2Pkg.CmdLine (CLI, debug, info, warn)
+import Cabal2Pkg.Extractor.Dependency.Executable (ExeDep(..))
+import Cabal2Pkg.Extractor.Dependency.Library (LibDep(..))
+import Cabal2Pkg.Extractor.Dependency.Version (cmpRange)
 import Cabal2Pkg.Extractor
-  ( PackageMeta(changeLog), summariseCabal, hasLibraries, hasExecutables, hasForeignLibs )
+  ( PackageMeta(..), summariseCabal, hasLibraries, hasExecutables, hasForeignLibs )
+import Data.Text qualified as T
+import Distribution.Types.PackageId (PackageIdentifier(..))
+import Cabal2Pkg.Pretty (prettyAnsi)
+import Cabal2Pkg.RawMeta (RawMeta(rmGPD), readRawMeta)
+import Cabal2Pkg.Site (PackageURI, renderPackageURI)
+import Data.Generics.Aliases (GenericQ, mkQ, extQ)
+import Data.Generics.Schemes (everything)
 import GHC.Stack (HasCallStack)
 import PackageInfo_cabal2pkg qualified as PI
 import Prettyprinter ((<+>), Doc)
 import Prettyprinter qualified as PP
 import Prettyprinter.Render.Terminal (AnsiStyle)
 import Prettyprinter.Render.Terminal qualified as PP
+import System.OsPath.Posix qualified as OP
 import Text.Show.Pretty (ppShow)
 
 command :: Doc AnsiStyle -> Doc AnsiStyle
@@ -26,6 +38,9 @@ command cmd =
   let cmd' = PP.pretty PI.name <+> cmd
   in
     PP.dquotes (PP.annotate (PP.colorDull PP.Green) cmd')
+
+command' :: Doc AnsiStyle
+command' = PP.pretty PI.name
 
 option :: Doc AnsiStyle -> Doc AnsiStyle
 option = PP.annotate (PP.colorDull PP.Green)
@@ -90,3 +105,84 @@ shouldHaveHsPrefix meta
   | not (hasLibraries meta) && hasExecutables meta && not (hasForeignLibs meta) = Just False
   | not (hasLibraries meta) && not (hasExecutables meta) && hasForeignLibs meta = Just False
   | otherwise = Nothing
+
+-- |Warn about dependencies that are too old to satisfy version
+-- constraints.
+warnOutdated :: PackageMeta -> CLI ()
+warnOutdated pm = everything (>>) go pm
+  where
+    go :: GenericQ (CLI ())
+    go = mkQ (pure ()) checkExeDep `extQ` checkLibDep
+
+    pkgId :: PackageIdentifier
+    pkgId = PackageIdentifier (distBase pm) (distVersion pm)
+
+    checkExeDep :: ExeDep -> CLI ()
+    checkExeDep (KnownBundledExe {..}) =
+      case cmpRange version verRange of
+        Just LT ->
+          warn $ PP.hsep [ prettyAnsi pkgId, "requires a compiler-bundled tool"
+                         , prettyAnsi name, prettyAnsi verRange
+                         , "but its version is currently", prettyAnsi version <> "."
+                         , "You first need to update the compiler to use this package."
+                         ]
+        Just _  -> pure ()
+        Nothing ->
+          warn $ PP.hsep [ prettyAnsi pkgId, "requires a compiler-bundled tool"
+                         , prettyAnsi name, prettyAnsi verRange
+                         , "but this version constraint is impossible to satisfy."
+                         , command', "does not know what to do."
+                         ]
+    checkExeDep (KnownPkgsrcExe {..}) =
+      case cmpRange version verRange of
+        Just LT ->
+          do path <- OP.encodeUtf . T.unpack $ pkgPath
+             warn $ PP.hsep [ prettyAnsi pkgId, "requires a tool"
+                            , prettyAnsi name, prettyAnsi verRange
+                            , "but its version is currently", prettyAnsi version <> "."
+                            , "You first need to update", prettyAnsi path
+                            , "or it will fail to build."
+                            ]
+        Just _  -> pure ()
+        Nothing ->
+          warn $ PP.hsep [ prettyAnsi pkgId, "requires a tool"
+                         , prettyAnsi name, prettyAnsi verRange
+                         , "but this version constraint is impossible to satisfy."
+                         , command', "does not know what to do."
+                         ]
+    checkExeDep (UnknownExe {}) = pure ()
+
+    checkLibDep :: LibDep -> CLI ()
+    checkLibDep (KnownBundledLib {..}) =
+      case cmpRange version verRange of
+        Just LT ->
+          warn $ PP.hsep [ prettyAnsi pkgId, "requires a compiler-bundled library"
+                         , prettyAnsi name, prettyAnsi verRange
+                         , "but its version is currently", prettyAnsi version <> "."
+                         , "You first need to update the compiler to use this package."
+                         ]
+        Just _  -> pure ()
+        Nothing ->
+          warn $ PP.hsep [ prettyAnsi pkgId, "requires a compiler-bundled library"
+                         , prettyAnsi name, prettyAnsi verRange
+                         , "but this version constraint is impossible to satisfy."
+                         , command', "does not know what to do."
+                         ]
+    checkLibDep (KnownPkgsrcLib {..}) =
+      case cmpRange version verRange of
+        Just LT ->
+          do path <- OP.encodeUtf . T.unpack $ pkgPath
+             warn $ PP.hsep [ prettyAnsi pkgId, "requires a library"
+                            , prettyAnsi name, prettyAnsi verRange
+                            , "but its version is currently", prettyAnsi version <> "."
+                            , "You first need to update", prettyAnsi path
+                            , "or it will fail to build."
+                            ]
+        Just _  -> pure ()
+        Nothing ->
+          warn $ PP.hsep [ prettyAnsi pkgId, "requires a library"
+                         , prettyAnsi name, prettyAnsi verRange
+                         , "but this version constraint is impossible to satisfy."
+                         , command', "does not know what to do."
+                         ]
+    checkLibDep (UnknownLib {}) = pure ()

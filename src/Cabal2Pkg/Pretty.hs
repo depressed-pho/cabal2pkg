@@ -5,8 +5,10 @@ module Cabal2Pkg.Pretty
   ) where
 
 import Distribution.Pretty (prettyShow)
+import Distribution.Types.PackageId (PackageIdentifier)
 import Distribution.Types.PackageName (PackageName)
 import Distribution.Types.Version (Version)
+import Distribution.Types.VersionRange (VersionRange)
 import Prettyprinter (Doc)
 import Prettyprinter qualified as PP
 import Prettyprinter.Render.Terminal (AnsiStyle)
@@ -32,10 +34,16 @@ instance PrettyAnsi PosixString where
       ppr' :: PosixString -> Doc ann
       ppr' = either (error . show) PP.pretty . OPP.decodeUtf
 
+instance PrettyAnsi PackageIdentifier where
+  prettyAnsi = PP.annotate (PP.colorDull PP.Green) . PP.pretty . prettyShow
+
 instance PrettyAnsi PackageName where
   prettyAnsi = PP.annotate (PP.colorDull PP.Green) . PP.pretty . prettyShow
 
 instance PrettyAnsi Version where
+  prettyAnsi = PP.annotate (PP.colorDull PP.Green) . PP.pretty . prettyShow
+
+instance PrettyAnsi VersionRange where
   prettyAnsi = PP.annotate (PP.colorDull PP.Green) . PP.pretty . prettyShow
 
 instance PrettyAnsi URI where

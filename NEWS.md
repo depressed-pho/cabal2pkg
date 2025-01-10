@@ -1,5 +1,12 @@
 # Revision history for cabal2pkg
 
+## 0.1.0.5 -- not released yet
+
+* Fixed an issue where dependencies that are unacceptably old are listed in
+  `HASKELL_UNRESTRICT_DEPENDENCIES`. This variable is supposed to only
+  contain packages that are unacceptably new. Now `cabal2pkg` emits
+  warnings when outdated dependencies are found.
+
 ## 0.1.0.4 -- 2025-01-09
 
 * Fixed an issue where setting a command name (as opposed to a command

@@ -14,10 +14,11 @@ import Distribution.Parsec (eitherParsec)
 import Distribution.Simple.PackageIndex qualified as C
 import Distribution.Types.Dependency qualified as C
 import Distribution.Types.InstalledPackageInfo qualified as C
+import Distribution.Types.PackageName (PackageName)
 import Distribution.Types.PackageName qualified as C
 import Distribution.Types.Version (Version)
-import Distribution.Types.VersionRange qualified as C
-import Data.List (isSuffixOf)
+import Distribution.Types.VersionRange (VersionRange)
+import Data.List qualified as L
 import Data.Text (Text)
 import Data.Text qualified as T
 import System.OsPath.Posix (pstr)
@@ -27,28 +28,39 @@ import System.OsPath.Posix qualified as OP
 -- |Dependency on a library provided by either the compiler or a pkgsrc
 -- package.
 data LibDep
-  = KnownLib
+  = KnownBundledLib
+    { -- |The name of Cabal package, such as @"base"@. This constructor is
+      -- used when 'Cabal2Pkg.Extractor.summariseCabal' finds that the
+      -- dependency is bundled with the compiler.
+      name :: !PackageName
+      -- |The version of the library it found.
+    , version :: !Version
+      -- |The range of versions that is acceptable.
+    , verRange :: !VersionRange
+    }
+  | KnownPkgsrcLib
     { -- |The name of Cabal package, such as @"semigroupoids"@. This
       -- constructor is used when 'Cabal2Pkg.Extractor.summariseCabal'
       -- finds that the dependency is packaged in pkgsrc.
-      name :: !Text
+      name :: !PackageName
       -- |The PKGPATH, such as @"math/hs-semigroupoids"@.
     , pkgPath :: !Text
+      -- |The version of the library it found.
+    , version :: !Version
+      -- |The range of versions that is acceptable.
+    , verRange :: !VersionRange
     }
   | UnknownLib
     { -- |The name of a Cabal package, such as @"semigroupoids"@. This
       -- constructor is used when 'Cabal2Pkg.Extractor.summariseCabal'
       -- cannot find the corresponding package in pkgsrc or bundled
-      -- libraries in GHC.
-      name :: !Text
+      -- libraries in the compiler.
+      name :: !PackageName
     }
   deriving (Data, Eq, Show)
 
 
--- |Return @(md, mt)@ where @md@ is 'Nothing' if the dependency is bundled
--- with the compiler, and @mt@ is the name of Cabal package if it needs to
--- be listed in @HASKELL_UNRESTRICT_DEPENDENCIES@.
-extractLibDep :: C.Dependency -> CLI (Maybe LibDep, Maybe Text)
+extractLibDep :: C.Dependency -> CLI LibDep
 extractLibDep dep
   = do ipi <- installedPkgs
        case lookupBundled ipi (C.depPkgName dep) of
@@ -59,27 +71,25 @@ extractLibDep dep
                 Just (path, ver) -> pure $ found path ver
                 Nothing          -> pure notFound
   where
-    name' :: Text
-    name' = T.pack . C.unPackageName . C.depPkgName $ dep
+    bundled :: Version -> LibDep
+    bundled ver =
+      KnownBundledLib
+      { name     = C.depPkgName dep
+      , version  = ver
+      , verRange = C.depVerRange dep
+      }
 
-    needsU :: Version -> Maybe Text
-    needsU ver
-      | not $ C.withinRange ver (C.depVerRange dep)
-          = Just name'
-      | otherwise
-          = Nothing
+    found :: Text -> Version -> LibDep
+    found path ver =
+      KnownPkgsrcLib
+      { name     = C.depPkgName dep
+      , pkgPath  = path
+      , version  = ver
+      , verRange = C.depVerRange dep
+      }
 
-    bundled :: Version -> (Maybe LibDep, Maybe Text)
-    bundled ver
-      = (Nothing, needsU ver)
-
-    found :: Text -> Version -> (Maybe LibDep, Maybe Text)
-    found path ver
-      = (Just (KnownLib name' path), needsU ver)
-
-    notFound :: (Maybe LibDep, Maybe Text)
-    notFound
-      = (Just (UnknownLib name'), Nothing)
+    notFound :: LibDep
+    notFound = UnknownLib { name = C.depPkgName dep }
 
 lookupBundled :: C.InstalledPackageIndex -> C.PackageName -> Maybe Version
 lookupBundled ipi name
@@ -91,7 +101,7 @@ lookupBundled ipi name
         -- "-inplace" to be bundled ones, but this is a fragile test.
         case C.hsLibraries pkg of
           lib : _
-            | "-inplace" `isSuffixOf` lib ->
+            | "-inplace" `L.isSuffixOf` lib ->
                 Just ver
           _ ->
             Nothing
@@ -118,13 +128,13 @@ findPkgsrcPkg name
               join <$> traverse found p1
   where
     found :: Package CLI -> CLI (Maybe (Text, Version))
-    found pkg
-      = do hask <- SrcDb.includesHaskellMk pkg
-           if hask
-             then do ver  <- toCabalVer =<< SrcDb.pkgVersionNoRev pkg
-                     path <- T.pack <$> OP.decodeUtf (SrcDb.pkgPath pkg)
-                     pure $ Just (path, ver)
-             else pure Nothing
+    found pkg =
+      do hask <- SrcDb.includesHaskellMk pkg
+         if hask
+           then do ver  <- toCabalVer =<< SrcDb.pkgVersionNoRev pkg
+                   path <- T.pack <$> OP.decodeUtf (SrcDb.pkgPath pkg)
+                   pure $ Just (path, ver)
+           else pure Nothing
 
     toCabalVer :: MonadFail m => Text -> m Version
     toCabalVer = either fail pure . eitherParsec . T.unpack

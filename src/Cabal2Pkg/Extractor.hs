@@ -1,7 +1,12 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Cabal2Pkg.Extractor
-  ( PackageMeta(..)
+  ( -- * Type
+    PackageMeta(..)
+
+    -- * Summarising package description
   , summariseCabal
+
+    -- * Querying package metadata
   , hasLibraries
   , hasForeignLibs
   , hasExecutables
@@ -18,7 +23,6 @@ import Data.CaseInsensitive as CI
 import Data.Char (toTitle)
 import Data.Data (Data)
 import Data.List.Extra (drop1)
-import Data.Set (Set)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
@@ -50,7 +54,6 @@ data PackageMeta = PackageMeta
   , license     :: !Text
   , changeLog   :: !(Maybe TL.Text)
   , flags       :: !FlagMap
-  , unrestrict  :: !(Set Text)
   , components  :: ![ComponentMeta]
   }
   deriving (Data, Show)
@@ -60,13 +63,13 @@ data PackageMeta = PackageMeta
 -- is, it doesn't read its @Makefile@ even if it exists.
 summariseCabal :: RawMeta -> CLI PackageMeta
 summariseCabal rawMeta
-  = do path     <- (T.pack <$>) . OP.decodeUtf =<< CLI.pkgPath
-       base     <- (T.pack <$>) . OP.decodeUtf =<< CLI.pkgBase
-       cat      <- (T.pack <$>) . OP.decodeUtf =<< CLI.pkgCategory
-       mtr      <- CLI.maintainer
-       owr      <- CLI.owner
-       fs       <- CLI.pkgFlags
-       (cs, ts) <- extractComponents gpd
+  = do path <- (T.pack <$>) . OP.decodeUtf =<< CLI.pkgPath
+       base <- (T.pack <$>) . OP.decodeUtf =<< CLI.pkgBase
+       cat  <- (T.pack <$>) . OP.decodeUtf =<< CLI.pkgCategory
+       mtr  <- CLI.maintainer
+       owr  <- CLI.owner
+       fs   <- CLI.pkgFlags
+       cs   <- extractComponents gpd
        pure PackageMeta
          { distBase    = C.pkgName . PD.package $ pd
          , distVersion = C.pkgVersion . PD.package $ pd
@@ -82,7 +85,6 @@ summariseCabal rawMeta
          , license     = extractLicense pd
          , changeLog   = rmChangeLog rawMeta
          , flags       = fs
-         , unrestrict  = ts
          , components  = cs
          }
   where

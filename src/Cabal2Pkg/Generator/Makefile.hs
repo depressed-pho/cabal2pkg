@@ -15,12 +15,15 @@ import Cabal2Pkg.Extractor.Dependency.Executable (ExeDep(..))
 import Cabal2Pkg.Extractor.Dependency.ExternalLib (ExtLibDep(..))
 import Cabal2Pkg.Extractor.Dependency.Library (LibDep(..))
 import Cabal2Pkg.Extractor.Dependency.PkgConfig (PkgConfDep(..))
+import Cabal2Pkg.Extractor.Dependency.Version (cmpRange)
 import Cabal2Pkg.Site (PackageURI(..), isFromHackage)
 import Cabal2Pkg.Site.GitHub (genGitHubMasterSites)
 import Cabal2Pkg.Site.GitLab (genGitLabMasterSites)
 import Data.Data (gmapQl)
-import Data.Generics.Aliases (GenericQ, mkQ)
+import Data.Generics.Aliases (GenericQ, mkQ, extQ)
+import Data.Generics.Schemes (everything)
 import Data.Map qualified as M
+import Data.Set (Set)
 import Data.Set qualified as S
 import Data.List.NonEmpty (NonEmpty((:|)))
 import Data.List.NonEmpty qualified as NE
@@ -31,6 +34,9 @@ import Data.Text.Lazy qualified as TL
 import Distribution.Pretty (prettyShow)
 import Distribution.Types.Flag (FlagName)
 import Distribution.Types.Flag qualified as C
+import Distribution.Types.PackageName (PackageName)
+import Distribution.Types.Version qualified as C
+import Distribution.Types.VersionRange qualified as C
 import GHC.Stack (HasCallStack)
 import Language.BMake.AST
   ( Makefile(..), Block(..), Directive(..), (#), (.=), (.+=), blank, include
@@ -134,11 +140,36 @@ genAST pm
     -- conditional tree.
     maybeUnrestrictDeps :: Makefile
     maybeUnrestrictDeps
-      = if S.null (unrestrict pm)
+      = if S.null depsToUnrestrict
         then mempty
-        else Makefile [ "HASKELL_UNRESTRICT_DEPENDENCIES" .+= S.toList (unrestrict pm)
+        else Makefile [ "HASKELL_UNRESTRICT_DEPENDENCIES" .+=
+                        T.pack . prettyShow <$> S.toList depsToUnrestrict
                       , blank
                       ]
+      where
+        depsToUnrestrict :: Set PackageName
+        depsToUnrestrict = everything (<>) go pm
+
+        go :: GenericQ (Set PackageName)
+        go = mkQ mempty exeDepU `extQ` libDepU
+
+        exeDepU :: ExeDep -> Set PackageName
+        exeDepU (KnownBundledExe {..}) = if cmpRange version verRange == Just GT
+                                         then S.singleton name
+                                         else mempty
+        exeDepU (KnownPkgsrcExe  {..}) = if cmpRange version verRange == Just GT
+                                         then S.singleton name
+                                         else mempty
+        exeDepU (UnknownExe      {  }) = mempty
+
+        libDepU :: LibDep -> Set PackageName
+        libDepU (KnownBundledLib {..}) = if cmpRange version verRange == Just GT
+                                         then S.singleton name
+                                         else mempty
+        libDepU (KnownPkgsrcLib  {..}) = if cmpRange version verRange == Just GT
+                                         then S.singleton name
+                                         else mempty
+        libDepU (UnknownLib      {  }) = mempty
 
     -- If any of the conditionals depend of variables defined in
     -- "../../mk/bsd.fast.prefs.mk", include it here.
@@ -169,10 +200,17 @@ genAST pm
           [c] ->
             let exeDeps'      = addPkgConf $ c ^. cDeps . always . exeDeps
                 addPkgConf xs
-                  | c ^. cDeps . always . pkgConfDeps . to (not . null)
+                  | c ^. cDeps . always . pkgConfDeps . to (not . null) =
                       -- We have an unconditional dependency on a
                       -- pkg-config package. Add it to USE_TOOLS.
-                      = KnownExe "pkg-config" : xs
+                      let pkgConf = KnownPkgsrcExe
+                                    { name     = "pkg-config"
+                                    , pkgPath  = mempty
+                                    , version  = C.nullVersion
+                                    , verRange = C.anyVersion
+                                    }
+                      in
+                        pkgConf : xs
                   | otherwise
                       = xs
             in
@@ -354,14 +392,16 @@ genExeDepsAST es
     known :: [Text]
     known = mapMaybe go es
       where
-        go (KnownExe   {..}) = Just name
-        go (UnknownExe {  }) = Nothing
+        go (KnownBundledExe {  }) = Nothing
+        go (KnownPkgsrcExe  {..}) = Just . T.pack . prettyShow $ name
+        go (UnknownExe      {  }) = Nothing
 
     unknown :: [Text]
     unknown = mapMaybe go es
       where
-        go (KnownExe   {  }) = Nothing
-        go (UnknownExe {..}) = Just name
+        go (KnownBundledExe {  }) = Nothing
+        go (KnownPkgsrcExe  {  }) = Nothing
+        go (UnknownExe      {..}) = Just . T.pack . prettyShow $ name
 
     maybeUnknown :: Block -> Block
     maybeUnknown bl
@@ -375,22 +415,29 @@ genExtLibDepAST (ExtLibDep name)
   = Makefile [ blank # "TODO: Include buildlink3.mk for " <> name ]
 
 genLibDepAST :: PackageMeta -> ComponentMeta -> LibDep -> Makefile
-genLibDepAST pm cm (KnownLib {..})
-  | cm ^. cType == Executable &&
-    pkgPath == "devel/hs-optparse-applicative"
-      -- A special case for executables depending on
-      -- optparse-applicative. Most of the time, if not always, their
-      -- command-line interface is built on top of optparse-applicative and
-      -- thus support generating shell completion scripts.
-      = let exeDecl = if cm ^. cName == (T.pack . prettyShow . distBase) pm
-                      then mempty
-                      else Makefile [ "OPTPARSE_APPLICATIVE_EXECUTABLES" .+= [cm ^. cName] ]
-        in
-          exeDecl <> Makefile [ include $ "../../" <> pkgPath <> "/application.mk" ]
-  | otherwise
-      = Makefile [ include $ "../../" <> pkgPath <> "/buildlink3.mk" ]
-genLibDepAST _ _ (UnknownLib {..})
-  = Makefile [ blank # "TODO: Package \"" <> name <> "\" and include its buildlink3.mk" ]
+genLibDepAST pm cm libDep =
+  case libDep of
+    KnownBundledLib {  } -> mempty
+    KnownPkgsrcLib  {..}
+      | cm ^. cType == Executable &&
+        pkgPath == "devel/hs-optparse-applicative" ->
+          -- A special case for executables depending on
+          -- optparse-applicative. Most of the time, if not always, their
+          -- command-line interface is built on top of optparse-applicative
+          -- and thus support generating shell completion scripts.
+          let exeDecl = if cm ^. cName == (T.pack . prettyShow . distBase) pm then
+                          mempty
+                        else
+                          Makefile [ "OPTPARSE_APPLICATIVE_EXECUTABLES" .+= [cm ^. cName] ]
+          in
+            exeDecl <> Makefile [ include $ "../../" <> pkgPath <> "/application.mk" ]
+      | otherwise ->
+          Makefile [ include $ "../../" <> pkgPath <> "/buildlink3.mk" ]
+    UnknownLib {..} ->
+      Makefile [ blank # mconcat [ "TODO: Package \""
+                                 , T.pack . prettyShow $ name
+                                 , "\" and include its buildlink3.mk"
+                                 ] ]
 
 genPkgConfDepAST :: PkgConfDep -> Makefile
 genPkgConfDepAST (PkgConfDep name)
