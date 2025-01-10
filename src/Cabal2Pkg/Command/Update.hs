@@ -434,7 +434,7 @@ applyChanges (UpdateOptions {..}) pkg oldMeta newMeta =
                         -- merged one. We will delete old files but we do
                         -- it at the very end.
                         renameFile' name (name <> backupSuffix)
-                        writeFreshFile' name merged
+                        updateFile' name merged
                         -- Warn if it has conflicts.
                         when (hasMarkers merged) . warn $
                           PP.hsep [ prettyAnsi name
@@ -462,7 +462,7 @@ applyChanges (UpdateOptions {..}) pkg oldMeta newMeta =
          update bl3 genBuildlink3 stripBl3Rev
          `catch` \(e :: IOError) ->
                    if isDoesNotExistError e then
-                     writeFreshFile' bl3 (genBuildlink3 newMeta)
+                     updateFile' bl3 (genBuildlink3 newMeta)
                    else
                      throw e
 
@@ -567,12 +567,12 @@ writeFile' name txt =
      writeFile cfp (TL.encodeUtf8 txt)
      info $ "Wrote " <> prettyAnsi ofp
 
-writeFreshFile' :: PosixPath -> TL.Text -> CLI ()
-writeFreshFile' name txt =
+updateFile' :: PosixPath -> TL.Text -> CLI ()
+updateFile' name txt =
   do cfp <- (</> name) <$> canonPkgDir
      ofp <- (</> name) <$> origPkgDir
      writeFreshFile cfp (TL.encodeUtf8 txt)
-     info $ "Wrote " <> prettyAnsi ofp
+     info $ "Updated " <> prettyAnsi ofp
 
 deleteFile' :: Bool -> PosixPath -> CLI ()
 deleteFile' showMsg name =

@@ -61,19 +61,24 @@ merge ms (labelA, fileA) (labelBase, fileBase) (labelB, fileB) =
     renderHunk (LeftChange  ts) = mconcat ts
     renderHunk (RightChange ts) = mconcat ts
     renderHunk (Unchanged   ts) = mconcat ts
-    renderHunk (Conflict as os bs) =
-      TLB.toLazyText $
-      mconcat [ marker '<' labelA
-              , mconcat $ TLB.fromLazyText <$> as
-              , case ms of
-                  RCS   -> mempty
-                  Diff3 -> mconcat [ marker '|' labelBase
-                                   , mconcat $ TLB.fromLazyText <$> os
-                                   ]
-              , marker '=' mempty
-              , mconcat $ TLB.fromLazyText <$> bs
-              , marker '>' labelB
-              ]
+    renderHunk (Conflict as os bs)
+      | as == bs  = mconcat as
+                    -- A and B both changed Base in exactly the same
+                    -- way. These aren't really conflicts in the usual
+                    -- sense but 'diff3' reports these as so.
+      | otherwise =
+          TLB.toLazyText $
+          mconcat [ marker '<' labelA
+                  , mconcat $ TLB.fromLazyText <$> as
+                  , case ms of
+                      RCS   -> mempty
+                      Diff3 -> mconcat [ marker '|' labelBase
+                                       , mconcat $ TLB.fromLazyText <$> os
+                                       ]
+                  , marker '=' mempty
+                  , mconcat $ TLB.fromLazyText <$> bs
+                  , marker '>' labelB
+                  ]
 
     marker :: Char -> Text -> TLB.Builder
     marker c label

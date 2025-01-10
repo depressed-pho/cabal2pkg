@@ -6,6 +6,9 @@
   `HASKELL_UNRESTRICT_DEPENDENCIES`. This variable is supposed to only
   contain packages that are unacceptably new. Now `cabal2pkg` emits
   warnings when outdated dependencies are found.
+* Fixed an issue where empty conflict markers could sometimes appear in
+  updated files. This could happen when pkgsrc maintainers and the upstream
+  made identical changes to the same portion of package metadata.
 
 ## 0.1.0.4 -- 2025-01-09
 
