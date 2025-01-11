@@ -53,8 +53,49 @@ data ExeDep
       -- corresponding package in pkgsrc.
       name :: !PackageName
     }
-  deriving (Data, Eq, Show)
+  deriving (Data, Show)
 
+-- |Equality ignores anything but 'name' so that dependencies are
+-- deduplicated.
+instance Eq ExeDep where
+  a == b =
+    case a of
+      KnownBundledExe {} ->
+        case b of
+          KnownBundledExe {} -> name a == name b
+          KnownPkgsrcExe  {} -> False
+          UnknownExe      {} -> False
+      KnownPkgsrcExe {} ->
+        case b of
+          KnownBundledExe {} -> False
+          KnownPkgsrcExe  {} -> name a == name b
+          UnknownExe      {} -> False
+      UnknownExe {} ->
+        case b of
+          KnownBundledExe {} -> False
+          KnownPkgsrcExe  {} -> False
+          UnknownExe      {} -> name a == name b
+
+-- |Ordering ignores anything but 'name' so that dependencies are
+-- deduplicated.
+instance Ord ExeDep where
+  compare a b =
+    case a of
+      KnownBundledExe {} ->
+        case b of
+          KnownBundledExe {} -> compare (name a) (name b)
+          KnownPkgsrcExe  {} -> LT
+          UnknownExe      {} -> LT
+      KnownPkgsrcExe {} ->
+        case b of
+          KnownBundledExe {} -> GT
+          KnownPkgsrcExe  {} -> compare (name a) (name b)
+          UnknownExe      {} -> LT
+      UnknownExe {} ->
+        case b of
+          KnownBundledExe {} -> GT
+          KnownPkgsrcExe  {} -> GT
+          UnknownExe      {} -> compare (name a) (name b)
 
 extractExeDep :: C.ExeDependency -> CLI ExeDep
 extractExeDep (C.ExeDependency pkgName _ range)

@@ -57,7 +57,49 @@ data LibDep
       -- libraries in the compiler.
       name :: !PackageName
     }
-  deriving (Data, Eq, Show)
+  deriving (Data, Show)
+
+-- |Equality ignores anything but 'name' so that dependencies are
+-- deduplicated.
+instance Eq LibDep where
+  a == b =
+    case a of
+      KnownBundledLib {} ->
+        case b of
+          KnownBundledLib {} -> name a == name b
+          KnownPkgsrcLib  {} -> False
+          UnknownLib      {} -> False
+      KnownPkgsrcLib {} ->
+        case b of
+          KnownBundledLib {} -> False
+          KnownPkgsrcLib  {} -> name a == name b
+          UnknownLib      {} -> False
+      UnknownLib {} ->
+        case b of
+          KnownBundledLib {} -> False
+          KnownPkgsrcLib  {} -> False
+          UnknownLib      {} -> name a == name b
+
+-- |Ordering ignores anything but 'name' so that dependencies are
+-- deduplicated.
+instance Ord LibDep where
+  compare a b =
+    case a of
+      KnownBundledLib {} ->
+        case b of
+          KnownBundledLib {} -> compare (name a) (name b)
+          KnownPkgsrcLib  {} -> LT
+          UnknownLib      {} -> LT
+      KnownPkgsrcLib {} ->
+        case b of
+          KnownBundledLib {} -> GT
+          KnownPkgsrcLib  {} -> compare (name a) (name b)
+          UnknownLib      {} -> LT
+      UnknownLib {} ->
+        case b of
+          KnownBundledLib {} -> GT
+          KnownPkgsrcLib  {} -> GT
+          UnknownLib      {} -> compare (name a) (name b)
 
 
 extractLibDep :: C.Dependency -> CLI LibDep

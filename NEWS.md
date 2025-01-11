@@ -9,6 +9,8 @@
 * Fixed an issue where empty conflict markers could sometimes appear in
   updated files. This could happen when pkgsrc maintainers and the upstream
   made identical changes to the same portion of package metadata.
+* `cabal2pkg` now deduplicates dependencies that appear in package metadata
+  more than once.
 
 ## 0.1.0.4 -- 2025-01-09
 

@@ -20,11 +20,13 @@ import Cabal2Pkg.Site (PackageURI(..), isFromHackage)
 import Cabal2Pkg.Site.GitHub (genGitHubMasterSites)
 import Cabal2Pkg.Site.GitLab (genGitLabMasterSites)
 import Data.Data (gmapQl)
+import Data.Foldable (toList)
 import Data.Generics.Aliases (GenericQ, mkQ, extQ)
 import Data.Generics.Schemes (everything)
 import Data.Map qualified as M
 import Data.Set (Set)
 import Data.Set qualified as S
+import Data.Set.Ordered qualified as OS
 import Data.List.NonEmpty (NonEmpty((:|)))
 import Data.List.NonEmpty qualified as NE
 import Data.Maybe (mapMaybe)
@@ -198,7 +200,7 @@ genAST pm
     useTools
       = case components pm of
           [c] ->
-            let exeDeps'      = addPkgConf $ c ^. cDeps . always . exeDeps
+            let exeDeps'      = addPkgConf $ c ^. cDeps . always . exeDeps . to toList
                 addPkgConf xs
                   | c ^. cDeps . always . pkgConfDeps . to (not . null) =
                       -- We have an unconditional dependency on a
@@ -239,7 +241,7 @@ genAST pm
     comps'
       = case components pm of
           [c] ->
-            let c' = c & cDeps . always . exeDeps .~ []
+            let c' = c & cDeps . always . exeDeps .~ OS.empty
             in
               [c']
           cs ->
@@ -378,10 +380,10 @@ flattenAnd = AST.And . NE.fromList . foldr go []
 
 genDepSetAST :: PackageMeta -> ComponentMeta -> DepSet -> Makefile
 genDepSetAST pm cm ds
-  = mconcat [ genExeDepsAST $ ds ^. exeDeps
-            , mconcat $ genExtLibDepAST    <$> ds ^. extLibDeps
-            , mconcat $ genLibDepAST pm cm <$> ds ^. libDeps
-            , mconcat $ genPkgConfDepAST   <$> ds ^. pkgConfDeps
+  = mconcat [ genExeDepsAST $ ds ^. exeDeps . to toList
+            , mconcat $ genExtLibDepAST    <$> ds ^. extLibDeps  . to toList
+            , mconcat $ genLibDepAST pm cm <$> ds ^. libDeps     . to toList
+            , mconcat $ genPkgConfDepAST   <$> ds ^. pkgConfDeps . to toList
             ]
 
 genExeDepsAST :: [ExeDep] -> Makefile

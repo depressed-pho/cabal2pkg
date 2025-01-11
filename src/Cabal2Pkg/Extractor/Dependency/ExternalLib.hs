@@ -17,7 +17,7 @@ newtype ExtLibDep
     { -- |The name of an external library, such as @"z"@ for @libz@.
       name :: Text
     }
-  deriving stock (Data, Eq, Show)
+  deriving stock (Data, Eq, Ord, Show)
 
 
 extractExtLibDep :: String -> ExtLibDep

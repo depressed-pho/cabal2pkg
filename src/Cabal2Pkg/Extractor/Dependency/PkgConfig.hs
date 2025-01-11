@@ -19,7 +19,7 @@ newtype PkgConfDep
     { -- |The name of a pkg-config package, such as @"cups"@.
       name :: Text
     }
-  deriving stock (Data, Eq, Show)
+  deriving stock (Data, Eq, Ord, Show)
 
 
 extractPkgConfDep :: C.PkgconfigDependency -> PkgConfDep

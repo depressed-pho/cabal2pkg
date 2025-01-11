@@ -12,6 +12,7 @@ import Cabal2Pkg.Extractor.Dependency (DepSet(..), exeDeps)
 import Cabal2Pkg.Generator.Makefile (genComponentsAST)
 import Data.Coerce (coerce)
 import Data.List.NonEmpty (NonEmpty((:|)))
+import Data.Set.Ordered qualified as OS
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
 import Distribution.Pretty (prettyShow)
@@ -133,7 +134,7 @@ hasDeps bl
 -- this?
 filterRunDeps :: CondBlock DepSet -> CondBlock DepSet
 filterRunDeps
-  = (always %~ exeDeps .~ [])
+  = (always %~ exeDeps .~ OS.empty)
   . (branches %~ (go <$>))
   where
     go :: CondBranch DepSet -> CondBranch DepSet
