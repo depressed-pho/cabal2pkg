@@ -1,6 +1,6 @@
 # Revision history for cabal2pkg
 
-## 0.1.0.5 -- not released yet
+## 0.1.1 -- 2025-01-11
 
 * Fixed an issue where dependencies that are unacceptably old are listed in
   `HASKELL_UNRESTRICT_DEPENDENCIES`. This variable is supposed to only
