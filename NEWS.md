@@ -11,6 +11,8 @@
   made identical changes to the same portion of package metadata.
 * `cabal2pkg` now deduplicates dependencies that appear in package metadata
   more than once.
+* `cabal2pkg` now supports updating wip packages. It was previously
+  unsupported for a technical reason but the limitation is now lifted.
 
 ## 0.1.0.4 -- 2025-01-09
 

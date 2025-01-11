@@ -71,17 +71,11 @@ run opts@(UpdateOptions {..}) =
      pkg  <- do mpkg <- SrcDb.findPackageByPath db path
                 case mpkg of
                   Just pkg -> pure pkg
-                  Nothing
-                    | OP.takeDirectory path == [pstr|wip|] ->
-                        fatal $ PP.hsep [ "Sorry but updating packages in wip"
-                                        , "is currently not supported due to"
-                                        , "a technical reason."
-                                        ]
-                    | otherwise ->
-                        fatal $ PP.hsep [ prettyAnsi path
-                                        , "doesn't look like a pkgsrc package. It has no"
-                                        , prettyAnsi [pstr|Makefile|] <> PP.pretty '.'
-                                        ]
+                  Nothing  -> fatal $
+                              PP.hsep [ prettyAnsi path
+                                      , "doesn't look like a pkgsrc package. It has no"
+                                      , prettyAnsi [pstr|Makefile|] <> PP.pretty '.'
+                                      ]
 
      -- If the user requested a version from Hackage, we can take a fast
      -- route getting the set of available versions and see if there's

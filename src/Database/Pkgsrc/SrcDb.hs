@@ -272,10 +272,11 @@ glType =
 -- |Create a database of pkgsrc packages.
 createSrcDb :: forall m.
                (MonadThrow m, MonadUnliftIO m)
-            => PosixPath -- ^The path to BSD make(1) command.
+            => Bool      -- ^Exclude @wip@ if 'True'.
+            -> PosixPath -- ^The path to BSD make(1) command.
             -> PosixPath -- ^The root directory of pkgsrc tree, typically @/usr/pkgsrc@.
             -> m (SrcDb m)
-createSrcDb makePath root =
+createSrcDb excludeWip makePath root =
   do let dirPath = -- Any package will do.
            root </> [pstr|pkgtools|] </> [pstr|pkg_install|]
      vars <- defer $ getMakeVars makePath dirPath
@@ -294,7 +295,7 @@ createSrcDb makePath root =
   where
     cats :: m (HashMap PosixPath (Deferred m (Category m)))
     cats = listDirectory root
-           >>= filterCats root
+           >>= filterCats excludeWip root
            >>= (HM.fromList <$>) . mapM deferCat
 
     deferCat :: PosixPath -> m (PosixPath, Deferred m (Category m))
@@ -310,14 +311,19 @@ createSrcDb makePath root =
            }
 
 -- |Only include directories that has a Makefile including
--- @../mk/misc/category.mk@. Also exclude @wip@.
-filterCats :: (MonadThrow m, MonadUnliftIO m) => PosixPath -> [PosixPath] -> m [PosixPath]
-filterCats root = (catMaybes <$>) . mapConcurrently go
+-- @../mk/misc/category.mk@. Also exclude @wip@ if the first argument is
+-- 'True'.
+filterCats :: (MonadThrow m, MonadUnliftIO m)
+           => Bool
+           -> PosixPath
+           -> [PosixPath]
+           -> m [PosixPath]
+filterCats excludeWip root = (catMaybes <$>) . mapConcurrently go
   where
     go :: (MonadIO m, MonadThrow m) => PosixPath -> m (Maybe PosixPath)
     go ent
-      | ent == [pstr|wip|] = pure Nothing
-      | otherwise          =
+      | excludeWip && ent == [pstr|wip|] = pure Nothing
+      | otherwise =
           do isDir <- doesDirectoryExist (root </> ent)
              if isDir
                then do let mk = root </> ent </> [pstr|Makefile|]

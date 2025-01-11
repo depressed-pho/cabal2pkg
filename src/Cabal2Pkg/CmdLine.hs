@@ -494,9 +494,14 @@ readPkgDb =
 
 mkSrcDb :: CLI (SrcDb CLI)
 mkSrcDb =
-  do make <- (^. optMakeCmd) <$> options
-     root <- OP.takeDirectory . OP.takeDirectory <$> canonPkgDir
-     createSrcDb make root
+  do isWip <- (== [pstr|wip|]) <$> pkgCategory
+     make  <- (^. optMakeCmd) <$> options
+     root  <- OP.takeDirectory . OP.takeDirectory <$> canonPkgDir
+     -- Exclude wip if the package isn't itself wip. This is to make sure
+     -- packages in the main pkgsrc tree don't depend on any of wip
+     -- packages. This also speeds up things by not looking into the wip
+     -- tree.
+     createSrcDb (not isWip) make root
 
 -- |Run the 'CLI' monad in 'IO'. When a synchronous exception except for
 -- 'ExitCode' is thrown, the function catches it, prints it to 'stderr',
