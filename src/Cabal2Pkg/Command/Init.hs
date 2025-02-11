@@ -6,8 +6,8 @@ module Cabal2Pkg.Command.Init
   ) where
 
 import Cabal2Pkg.CmdLine
-  ( CLI, InitOptions(..), debug, fatal, info, warn, canonPkgDir, origPkgDir
-  , makeCmd, pkgBase, runMake, wantCommitMsg )
+  ( CLI, InitOptions(..), debug, fatal, fillColumn, info, warn, canonPkgDir
+  , origPkgDir, makeCmd, pkgBase, runMake, wantCommitMsg )
 import Cabal2Pkg.Command.Common
   ( command, option, fetchMeta, shouldHaveBuildlink3, shouldHaveHsPrefix
   , warnOutdated )
@@ -53,7 +53,8 @@ run (InitOptions {..}) =
 
      -- These files are generated from the package description. We don't
      -- overwrite existing files unless -w is given.
-     let descr = genDESCR meta
+     width <- fillColumn
+     let descr = genDESCR width meta
      debug $ "Generated DESCR:\n" <> PP.pretty (TL.strip descr)
      writeFile' [pstr|DESCR|] descr
 
@@ -68,7 +69,7 @@ run (InitOptions {..}) =
 
      wantCMsg <- wantCommitMsg
      when wantCMsg $
-       do let cMsg = genImportMsg meta
+       do let cMsg = genImportMsg width meta
           debug $ "Generated COMMIT_MSG:\n" <> PP.pretty (TL.strip cMsg)
           writeFile' [pstr|COMMIT_MSG|] cMsg
 

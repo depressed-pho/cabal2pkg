@@ -27,6 +27,7 @@ module Cabal2Pkg.CmdLine
   , canonPkgDir
   , makeCmd
   , pkgFlags
+  , fillColumn
   , maintainer
   , owner
   , showPkgFlags
@@ -92,6 +93,7 @@ import Distribution.Types.Version (Version)
 import Distribution.Verbosity (silent)
 import GHC.Paths.PosixPath qualified as Paths
 import Network.URI (URI, parseAbsoluteURI, parseURIReference)
+import Numeric.Natural (Natural)
 import Options.Applicative (Parser, ParserInfo, ParserPrefs, ReadM)
 import Options.Applicative qualified as OA
 import Lens.Micro.Platform ((^.), (.~), (%~), makeLenses, to)
@@ -149,6 +151,7 @@ data Options
     , _optDebug       :: !Bool
     , _optPkgDir      :: !PosixPath
     , _optPkgFlags    :: !FlagMap
+    , _optFillColumn  :: !Natural
     , _optGHCCmd      :: !PosixPath
     , _optMakeCmd     :: !PosixPath
     }
@@ -254,6 +257,13 @@ optionsP noColor =
                    ])
         )
       )
+  <*> OA.option OA.auto
+      (mconcat [ OA.long "fill-column"
+               , OA.help "Column beyond which line-wrapping should happen"
+               , OA.showDefault
+               , OA.value 76
+               , OA.metavar "COLUMN"
+               ])
   <*> OA.option path
       (mconcat [ OA.long "ghc"
                , OA.help "The path to GHC executable"
@@ -569,6 +579,9 @@ makeCmd = (^. optMakeCmd) <$> options
 
 pkgFlags :: CLI FlagMap
 pkgFlags = (^. optPkgFlags) <$> options
+
+fillColumn :: CLI Natural
+fillColumn = (^. optFillColumn) <$> options
 
 maintainer :: CLI (Maybe Text)
 maintainer = CLI $ asks (^. ctxMaintainer)

@@ -1,8 +1,11 @@
 # Revision history for cabal2pkg
 
-## 0.1.1.1 -- not released yet
+## 0.1.2 -- not released yet
 
 * Fixed build with GHC 9.10. `cabal2pkg` no longer supports GHC 9.8.
+* Added a global option `--fill-column=COLUMN` for specifying page
+  width. Currently only used for generating `DESCR` files. Previously it
+  was fixed to 80, but now it's defaulted to 76.
 
 ## 0.1.1 -- 2025-01-11
 

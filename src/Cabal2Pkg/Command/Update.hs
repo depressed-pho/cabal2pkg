@@ -6,9 +6,10 @@ module Cabal2Pkg.Command.Update
   ) where
 
 import Cabal2Pkg.CmdLine
-  ( CLI, UpdateOptions(..), FlagMap, debug, fatal, info, warn, pkgPath, srcDb
-  , distDir, canonPkgDir, origPkgDir, makeCmd, runMake, withPkgFlagsHidden
-  , withPkgFlagsModified, withMaintainer, withOwner, wantCommitMsg )
+  ( CLI, UpdateOptions(..), FlagMap, debug, fatal, fillColumn, info, warn
+  , pkgPath, srcDb, distDir, canonPkgDir, origPkgDir, makeCmd, runMake
+  , withPkgFlagsHidden, withPkgFlagsModified, withMaintainer, withOwner
+  , wantCommitMsg )
 import Cabal2Pkg.Command.Common
   ( command, command', option, fetchMeta, shouldHaveBuildlink3, warnOutdated )
 import Cabal2Pkg.Extractor (PackageMeta(distBase, distVersion, origin))
@@ -438,7 +439,8 @@ applyChanges (UpdateOptions {..}) pkg oldMeta newMeta =
 
      -- These files are generated from the package description, and they
      -- should always exist.
-     update [pstr|DESCR|]    genDESCR    id
+     width <- fillColumn
+     update [pstr|DESCR|]    (genDESCR width) id
      update [pstr|Makefile|] genMakefile stripMakefileRev
 
      -- buildlink3.mk is a tricky one.

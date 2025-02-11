@@ -16,6 +16,7 @@ import Documentation.Haddock.Types
 import Documentation.Haddock.Markup qualified as Haddock
 import Documentation.Haddock.Parser qualified as Haddock
 import GHC.Stack (HasCallStack)
+import Numeric.Natural (Natural)
 import Prelude hiding (lines, words)
 import Prettyprinter ((<+>), Doc, LayoutOptions(..), PageWidth(..))
 import Prettyprinter qualified as PP
@@ -25,27 +26,24 @@ import Prettyprinter.Render.Text (renderLazy)
 -- import Text.Show.Pretty (ppShow)
 
 
-genDESCR :: HasCallStack => PackageMeta -> TL.Text
-genDESCR = (<> "\n")
-           . TL.strip
-           . renderLazy
-           . PP.layoutPretty opts
-           . mconcat
-           . Haddock.markup (plainTextMarkup undefined PP.pretty)
-           -- . traceWith (ppShow :: DocH () String -> String)
-           . fixup
-           . Haddock.toRegular
-           . _doc
-           . Haddock.parseParas Nothing
-           . T.unpack
-           . description
+genDESCR :: HasCallStack => Natural -> PackageMeta -> TL.Text
+genDESCR width = (<> "\n")
+                 . TL.strip
+                 . renderLazy
+                 . PP.layoutPretty opts
+                 . mconcat
+                 . Haddock.markup (plainTextMarkup undefined PP.pretty)
+                 -- . traceWith (ppShow :: DocH () String -> String)
+                 . fixup
+                 . Haddock.toRegular
+                 . _doc
+                 . Haddock.parseParas Nothing
+                 . T.unpack
+                 . description
   where
-    width :: Int
-    width = 80
-
     opts :: LayoutOptions
     opts = LayoutOptions
-           { layoutPageWidth = AvailablePerLine width 1
+           { layoutPageWidth = AvailablePerLine (fromIntegral width) 1
            }
 
 -- |Strip 'DocParagraph' in lists.

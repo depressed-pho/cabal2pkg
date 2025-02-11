@@ -11,17 +11,18 @@ import Data.Algorithm.Diff (PolyDiff(..), getGroupedDiff)
 import Data.List (find)
 import Data.Text.Lazy qualified as TL
 import Distribution.Pretty (prettyShow)
+import Numeric.Natural (Natural)
 
 
-genImportMsg :: PackageMeta -> TL.Text
-genImportMsg meta@(PackageMeta {..}) =
+genImportMsg :: Natural -> PackageMeta -> TL.Text
+genImportMsg width meta@(PackageMeta {..}) =
   mconcat [ TL.fromStrict pkgPath
           , ": import "
           , TL.pack $ prettyShow distBase
           , "-"
           , TL.pack $ prettyShow distVersion
           , "\n\n"
-          , genDESCR meta
+          , genDESCR width meta
           ]
 
 genUpdateMsg :: PackageMeta -> PackageMeta -> TL.Text
