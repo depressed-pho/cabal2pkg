@@ -6,6 +6,8 @@
 * Added a global option `--fill-column=COLUMN` for specifying page
   width. Currently only used for generating `DESCR` files. Previously it
   was fixed to 80, but now it's defaulted to 76.
+* Fixed the `COMMIT_MSG` saying "no release notes have been provided"
+  having no newlines at the end of file.
 
 ## 0.1.1 -- 2025-01-11
 

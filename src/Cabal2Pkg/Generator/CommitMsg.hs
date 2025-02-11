@@ -58,7 +58,7 @@ genUpdateMsg oldMeta newMeta =
             case find isSecond diff of
               Just (Second ls) -> (<> "\n") . TL.strip . TL.unlines $ ls
               Just _           -> error "logically impossible"
-              Nothing          -> noRelNotes
+              Nothing          -> (<> "\n") . TL.strip $ noRelNotes
 
     isSecond :: PolyDiff a b -> Bool
     isSecond Second {} = True

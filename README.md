@@ -116,6 +116,11 @@ this:
     .include "../../mk/haskell.mk"
     .include "../../mk/bsd.pkg.mk"
 
+`--fill-column`=`COLUMN`  
+Column beyond which line-wrapping should happen. Only used for
+<span class="Pa">DESCR</span> files at the time of writing this manual
+page.
+
 `--ghc`=`FILE`  
 The path to GHC executable. This is mostly used for locating the Haskell
 package directory. Its default value is determined at the build time.
