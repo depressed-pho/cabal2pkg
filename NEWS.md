@@ -1,5 +1,9 @@
 # Revision history for cabal2pkg
 
+## 0.1.1.1 -- not released yet
+
+* Fixed build with GHC 9.10. `cabal2pkg` no longer supports GHC 9.8.
+
 ## 0.1.1 -- 2025-01-11
 
 * Fixed an issue where dependencies that are unacceptably old are listed in

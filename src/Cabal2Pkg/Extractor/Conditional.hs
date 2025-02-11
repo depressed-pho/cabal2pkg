@@ -15,7 +15,6 @@ module Cabal2Pkg.Extractor.Conditional
 import Cabal2Pkg.CmdLine (FlagMap)
 import Control.Monad.IO.Unlift (MonadUnliftIO)
 import Data.Data (Data)
-import Data.Foldable (foldl')
 import Data.Map.Strict qualified as M
 import Data.Maybe (isNothing)
 import Data.Text (Text)
@@ -191,6 +190,7 @@ extractOSCond os
       C.Android   -> Literal False
       C.Ghcjs     -> Literal False
       C.Wasi      -> Literal False
+      C.Haiku     -> c "Haiku"
       C.OtherOS _ -> Literal False
   where
     c :: Text -> Condition
@@ -206,8 +206,10 @@ extractArchCond arch
       C.I386        -> c "i386"
       C.X86_64      -> c "x86_64"
       C.PPC         -> c "powerpc"
-      C.PPC64       -> Not (c' $ AST.EEmpty "MACHINE_ARCH:Mpowerpc64*")
+      C.PPC64       -> c "powerpc64"
+      C.PPC64LE     -> c "powerpc64le"
       C.Sparc       -> c "sparc"
+      C.Sparc64     -> c "sparc64"
       C.Arm         -> Not (c' $ AST.EEmpty "MACHINE_ARCH:M*arm*")
       C.AArch64     -> c "aarch64"
       C.Mips        -> Not (c' $ AST.EEmpty "MACHINE_ARCH:Mmips*")
@@ -220,6 +222,8 @@ extractArchCond arch
       C.Rs6000      -> Literal False
       C.M68k        -> c "m68k"
       C.Vax         -> c "vax"
+      C.RISCV64     -> c "riscv64"
+      C.LoongArch64 -> Literal False -- not supported by pkgsrc
       C.JavaScript  -> Literal False
       C.Wasm32      -> Literal False
       C.OtherArch _ -> Literal False

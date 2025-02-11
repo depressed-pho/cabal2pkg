@@ -3,7 +3,7 @@
 module System.OsString.Posix.Instances () where
 
 import Data.CaseInsensitive (FoldCase(..))
-import System.OsPath.Data.ByteString.Short (fromShort, toShort)
+import System.OsString.Data.ByteString.Short (fromShort, toShort)
 import System.OsString.Internal.Types (PosixString(..))
 
 instance FoldCase PosixString where

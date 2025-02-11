@@ -44,7 +44,6 @@ module Language.BMake.AST
   ) where
 
 import Data.Data (Data)
-import Data.Foldable (foldl')
 import Data.List.NonEmpty (NonEmpty((:|)))
 import Data.List.NonEmpty qualified as NE
 import Data.Maybe (isNothing)

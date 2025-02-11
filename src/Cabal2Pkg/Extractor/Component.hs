@@ -14,7 +14,7 @@ import Cabal2Pkg.Extractor.Conditional
 import Cabal2Pkg.Extractor.Dependency (DepSet, extractDeps)
 import Control.Monad (when, unless)
 import Data.Data (Data)
-import Data.Foldable (foldl', toList)
+import Data.Foldable (toList)
 import Data.Map.Strict qualified as M
 import Data.Set qualified as S
 import Data.Maybe (maybeToList)
