@@ -11,7 +11,13 @@ PAGER?= less
 .PHONY: lint
 lint:
 	cabal check | ${PAGER}
-	hlint src --color=always -j | ${PAGER}
+	@if which hlint >/dev/null 2>&1; then \
+		cmd="hlint src --color=always -j | ${PAGER}"; \
+		echo "$$cmd"; \
+		eval "$$cmd"; \
+	else \
+		echo "hlint is not installed"; \
+	fi
 
 .PHONY: stan
 stan:

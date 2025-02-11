@@ -107,7 +107,7 @@ executable cabal2pkg
       , either               ^>= 5.0.2
       , exceptions           ^>= 0.10.7
       , extra                ^>= 1.8
-      , filepath              >= 1.5.2
+      , filepath             ^>= 1.5.2
       , ghc-paths            ^>= 0.1
       , haddock-library      ^>= 1.11.0
       , http-conduit         ^>= 2.3.9
