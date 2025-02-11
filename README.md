@@ -1,14 +1,7 @@
----
-date: January 4, 2025
-section: 8
-title: CABAL2PKG
----
-
 <!--
 DO NOT EDIT: This file is generated with the following command:
   pandoc --from mdoc --to gfm doc/cabal2pkg.8
 -->
-
 # NAME
 
 `cabal2pkg` — automate importing/updating Haskell packages in pkgsrc

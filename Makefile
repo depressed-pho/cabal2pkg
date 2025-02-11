@@ -26,12 +26,12 @@ stan:
 # ----------------------------------------------------------------------
 all: README.md
 
-README.md: doc/cabal2pkg.8
+README.md: doc/cabal2pkg.8 Makefile
 	{ \
 		echo '<!--'; \
 		echo 'DO NOT EDIT: This file is generated with the following command:'; \
-		echo '  pandoc --from mdoc --to gfm $>'; \
+		echo '  pandoc --from mdoc --to gfm doc/cabal2pkg.8'; \
 		echo '-->'; \
-	} | pandoc --from mdoc --to gfm --include-in-header=/dev/stdin $> \
-		> $@.tmp
-	mv -f $@.tmp $@ # Overwrite $@ only if the above command succeeded.
+	} > $@.tmp
+	pandoc --from mdoc --to gfm doc/cabal2pkg.8 >> $@.tmp
+	mv -f $@.tmp $@ # Overwrite $@ only if the above commands succeeded.
