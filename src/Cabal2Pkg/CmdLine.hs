@@ -72,7 +72,7 @@ import Control.Monad.Trans.Resource (MonadResource, ResourceT, runResourceT)
 import Data.Bifunctor (first, second)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as M
-import Data.Maybe (fromJust)
+import Data.Maybe (fromJust, fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy.Merge (MarkerStyle(..))
@@ -91,7 +91,6 @@ import Distribution.Types.Flag (FlagName)
 import Distribution.Types.Flag qualified as C
 import Distribution.Types.Version (Version)
 import Distribution.Verbosity (silent)
-import GHC.Paths.PosixPath qualified as Paths
 import Network.URI (URI, parseAbsoluteURI, parseURIReference)
 import Numeric.Natural (Natural)
 import Options.Applicative (Parser, ParserInfo, ParserPrefs, ReadM)
@@ -104,7 +103,8 @@ import Prettyprinter qualified as PP
 import Prettyprinter.Render.Terminal (AnsiStyle)
 import Prettyprinter.Render.Terminal qualified as PP
 import System.Console.ANSI (hNowSupportsANSI)
-import System.Directory.PosixPath (doesFileExist, canonicalizePath)
+import System.Directory.PosixPath
+  (doesFileExist, canonicalizePath, findExecutable)
 import System.Environment (lookupEnv)
 import System.Exit (ExitCode, exitFailure)
 import System.IO (stderr)
@@ -206,8 +206,8 @@ data Context
     }
 makeLenses ''Context
 
-optionsP :: Bool -> Parser Options
-optionsP noColor =
+optionsP :: Bool -> PosixPath -> Parser Options
+optionsP noColor ghcPath =
   Options
   <$> commandP
   <*> OA.option colourPref
@@ -269,7 +269,7 @@ optionsP noColor =
                , OA.help "The path to GHC executable"
                , OA.action "file"
                , OA.showDefault
-               , OA.value Paths.ghc
+               , OA.value ghcPath
                , OA.metavar "FILE"
                ])
   <*> OA.option path
@@ -411,10 +411,16 @@ lookupNoColor =
               Just "" -> False
               Just _  -> True
 
+defaultGHCPath :: MonadIO m => m PosixPath
+defaultGHCPath = fromMaybe ghc <$> findExecutable ghc
+  where
+    ghc = [pstr|ghc|]
+
 parseOptions :: IO Options
 parseOptions =
   do noColor <- lookupNoColor
-     OA.customExecParser prefs (spec noColor)
+     ghcPath <- defaultGHCPath
+     OA.customExecParser prefs (spec noColor ghcPath)
   where
     prefs :: ParserPrefs
     prefs = OA.prefs . mconcat
@@ -424,9 +430,9 @@ parseOptions =
                 -- or not.
               ]
 
-    spec :: Bool -> ParserInfo Options
-    spec noColor =
-      OA.info (optionsP noColor <**> OA.helper <**> OA.simpleVersioner ver)
+    spec :: Bool -> PosixPath -> ParserInfo Options
+    spec noColor ghcPath =
+      OA.info (optionsP noColor ghcPath <**> OA.helper <**> OA.simpleVersioner ver)
       ( OA.fullDesc
         <> OA.header (PI.name <> " - " <> PI.synopsis)
       )

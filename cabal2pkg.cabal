@@ -83,7 +83,6 @@ executable cabal2pkg
         Control.Concurrent.Deferred
         Data.Text.Lazy.Merge
         Database.Pkgsrc.SrcDb
-        GHC.Paths.PosixPath
         Language.BMake.AST
         PackageInfo_cabal2pkg
         System.File.PosixPath.Alt
@@ -108,7 +107,6 @@ executable cabal2pkg
       , exceptions           ^>= 0.10.7
       , extra                ^>= 1.8
       , filepath             ^>= 1.5.2
-      , ghc-paths            ^>= 0.1
       , haddock-library      ^>= 1.11.0
       , http-conduit         ^>= 2.3.9
       , http-media           ^>= 0.8.1

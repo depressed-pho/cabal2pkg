@@ -8,6 +8,11 @@
   was fixed to 80, but now it's defaulted to 76.
 * Fixed the `COMMIT_MSG` saying "no release notes have been provided"
   having no newlines at the end of file.
+* `cabal2pkg` no longer hard-codes the path to GHC found at compile
+  time. It now instead searches in PATH at run-time. This is because
+  `cabal2pkg` is intended to be used while the pkgsrc tree is in an
+  inconsistent state where it isn't always possible to rebuild `cabal2pkg`
+  immediately after updating GHC.
 
 ## 0.1.1 -- 2025-01-11
 
