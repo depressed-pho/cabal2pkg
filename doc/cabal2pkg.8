@@ -48,7 +48,7 @@ files.
 .\" -----------------------------------------------------------------------
 .Ss Global options
 The following options are available for all subcommands:
-.Bl -tag -width indent
+.Bl -tag -width Fl
 .It Fl \-color Ns = Ns Ar WHEN , Fl \-colour Ns = Ns Ar WHEN
 Use colours on output.
 .Ar WHEN
@@ -190,7 +190,7 @@ Display the version of
 .El
 .\" -----------------------------------------------------------------------
 .Ss Subcommands
-.Bl -tag -width indent
+.Bl -tag -width Cm
 .It Cm init
 The
 .Cm init
@@ -230,7 +230,7 @@ will be chosen.
 The
 .Cm init
 subcommand can additionally take the following options:
-.Bl -tag -width indent
+.Bl -tag -width Fl
 .It Fl w , Fl \-overwrite
 Allow the command to overwrite existing files.  Without this option it
 refuses to overwrite files, regardless of whether they have been modified
@@ -262,7 +262,7 @@ version from Hackage.
 The
 .Cm update
 subcommand can additionally take the following options:
-.Bl -tag -width indent
+.Bl -tag -width Fl
 .It Fl f , Fl \-force
 Perform the update forcefully.  Without this option the
 .Cm update
@@ -299,7 +299,7 @@ or
 .Sh ENVIRONMENT
 The following environment variables affect the behaviour of
 .Nm :
-.Bl -tag -width indent
+.Bl -tag -width Ev
 .It Ev MAKE
 The name of, or the path to BSD
 .Xr make 1
@@ -335,7 +335,9 @@ inherits whatever set in the current
 .Sh FILES
 .Nm
 creates or updates the following files in a package directory:
-.Bl -tag -width indent
+.\" "-width Pa" is too wide. Let's just use the widest file path in this
+.\" list.
+.Bl -tag -width "buildlink3.mk"
 .It Pa COMMIT_MSG
 This file is created (or overwritten) when the option
 .Fl n

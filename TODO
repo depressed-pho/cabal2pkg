@@ -1,7 +1,7 @@
 # -*- org -*-
 
 * DONE [#A] =cabal update= should try to extract ChangeLog entries
-* TODO [#A] Automate generating README.md; it is currently done manually
+* DONE [#A] Automate generating README.md; it is currently done manually
 * DONE [#A] =HASKELL_UNRESTRICT_DEPENDENCIES= should only be generated to allow newer deps but not older ones
 * DONE [#B] Allow wip packages to update
 * DONE [#C] Can we somehow filter out duplicate dependencies listed in the same component? (pandoc-lua-marshal-0.3.0)

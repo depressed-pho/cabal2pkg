@@ -1,7 +1,14 @@
+---
+date: January 4, 2025
+section: 8
+title: CABAL2PKG
+---
+
 <!--
 DO NOT EDIT: This file is generated with the following command:
-  pandoc --from mdoc --to markdown_github ./doc/cabal2pkg.8
+  pandoc --from mdoc --to gfm doc/cabal2pkg.8
 -->
+
 # NAME
 
 `cabal2pkg` — automate importing/updating Haskell packages in pkgsrc
@@ -65,7 +72,7 @@ Running the command above in a pkgsrc directory
 package files, whose <span class="Pa">Makefile</span> containing the
 following line:
 
-    CONFIGURE_ARGS+=	-f +bar
+    CONFIGURE_ARGS+=    -f +bar
 
 Applying package flags affects conditionals in
 <span class="Pa">.cabal</span> files. Haskell packages can have optional
@@ -90,8 +97,8 @@ it additionally depends on package `lua`. Without enabling this flag,
 
     # $NetBSD$
 
-    DISTNAME=	foo-1.0
-    CATEGORIES=	devel
+    DISTNAME=   foo-1.0
+    CATEGORIES= devel
 
     # MAINTAINER, COMMENT, LICENSE, ...
 
@@ -104,12 +111,12 @@ this:
 
     # $NetBSD$
 
-    DISTNAME=	foo-1.0
-    CATEGORIES=	devel
+    DISTNAME=   foo-1.0
+    CATEGORIES= devel
 
     # MAINTAINER, COMMENT, LICENSE, ...
 
-    CONFIGURE_ARGS+=	-f +lua
+    CONFIGURE_ARGS+=    -f +lua
 
     .include "../../converters/hs-aeson/buildlink3.mk"
     .include "../../lang/hs-lua/buildlink3.mk"
@@ -139,19 +146,17 @@ directory specified with `-p`) with a newly created pkgsrc package. This
 subcommand takes a single positional argument `PACKAGE-URI` specifying
 which Haskell package to import. It can be one of the following:
 
--   `http://` or `https://` URL of a package tarball. This is a
-    preferred way of importing packages that are not registered to
-    Hackage.
+- `http://` or `https://` URL of a package tarball. This is a preferred
+  way of importing packages that are not registered to Hackage.
 
--   `file://` URL of a package tarball on the local filesystem. This is
-    mostly for debugging purpose and is generally unrecommended to use,
-    because <span class="Pa">Makefile</span> generated from a local
-    tarball will not have `MASTER_SITES`.
+- `file://` URL of a package tarball on the local filesystem. This is
+  mostly for debugging purpose and is generally unrecommended to use,
+  because <span class="Pa">Makefile</span> generated from a local
+  tarball will not have `MASTER_SITES`.
 
--   The name of a package to retrieve from Hackage, in the form of
-    `NAME` or `NAME`-`VERSION` (e.g. `foo-0.1.2`). If the version is
-    omitted, the latest available (and non-deprecated) one will be
-    chosen.
+- The name of a package to retrieve from Hackage, in the form of `NAME`
+  or `NAME`-`VERSION` (e.g. `foo-0.1.2`). If the version is omitted, the
+  latest available (and non-deprecated) one will be chosen.
 
 The `init` subcommand can additionally take the following options:
 
@@ -181,14 +186,14 @@ Perform the update forcefully. Without this option the `update`
 subcommand refuses to update the package if any of the following
 conditions are met, and this option overrides the refusal:
 
--   The given new version is actually older than the current one.
+- The given new version is actually older than the current one.
 
--   The given new version has been marked as deprecated on Hackage. This
-    usually means that version has known defects and the upstream thinks
-    it shouldn't be used.
+- The given new version has been marked as deprecated on Hackage. This
+  usually means that version has known defects and the upstream thinks
+  it shouldn't be used.
 
--   You are updating a package with a local tarball, which makes it lose
-    its `MASTER_SITES`.
+- You are updating a package with a local tarball, which makes it lose
+  its `MASTER_SITES`.
 
 `-m` `STYLE`, `--merge`=`STYLE`  
 Choose the style of conflict markers. `STYLE` can either be `rcs` (RCS
