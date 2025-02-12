@@ -114,6 +114,12 @@ run opts@(UpdateOptions {..}) =
                       -- It's not but the user explicitly asked to do it.
                       LT | optForce  -> downgradeForced path ver pkgId >> cont pkgURI
                          | otherwise -> downgradeRefused path ver pkgId
+                  Just Hackage.Unpreferred ->
+                    case ver `compare` pkgVersion pkgId of
+                      GT             -> unprUpdateRequested path ver >> cont pkgURI
+                      EQ             -> alreadyExactUnpr path ver
+                      LT | optForce  -> unprDowngradeForced path ver pkgId >> cont pkgURI
+                         | otherwise -> unprDowngradeRefused path ver pkgId
                   Just Hackage.Deprecated ->
                     case ver `compare` pkgVersion pkgId of
                       GT | optForce  -> deprUpdateForced path ver >> cont pkgURI
@@ -161,7 +167,7 @@ downgradeForced path ver pkgId =
                  , prettyAnsi ver
                  , "but it's older than the current version"
                  , prettyAnsi (pkgVersion pkgId) <> PP.pretty '.'
-                 , "Proceeding to downgrade it anyway because you explicitly asked to."
+                 , "Proceeding to downgrade it anyway because you explicitly asked for."
                  ]
 
 downgradeRefused :: HasCallStack => PosixPath -> Version -> PackageIdentifier -> CLI ()
@@ -178,6 +184,54 @@ downgradeRefused path ver pkgId =
                   , option "-f"
                   ]
 
+unprUpdateRequested :: HasCallStack => PosixPath -> Version -> CLI ()
+unprUpdateRequested path ver =
+  warn $ PP.hsep [ "You requested to update"
+                 , prettyAnsi path
+                 , "to version"
+                 , prettyAnsi ver
+                 , "but it's been marked as unpreferred on Hackage."
+                 , "Proceeding to use this version anyway because you explicitly asked for."
+                 ]
+
+alreadyExactUnpr :: HasCallStack => PosixPath -> Version -> CLI ()
+alreadyExactUnpr path ver =
+  warn $ PP.hsep [ "You requested to update"
+                 , prettyAnsi path
+                 , "to version"
+                 , prettyAnsi ver
+                 , "but it's already at that exact version."
+                 , "Note that it's been marked as unpreferred on Hackage."
+                 ]
+
+unprDowngradeForced :: HasCallStack => PosixPath -> Version -> PackageIdentifier -> CLI ()
+unprDowngradeForced path ver pkgId =
+  warn $ PP.hsep [ "You requested to update"
+                 , prettyAnsi path
+                 , "to version"
+                 , prettyAnsi ver
+                 , "but it's older than the current version"
+                 , prettyAnsi (pkgVersion pkgId) <> PP.pretty '.'
+                 , "The requested version is also marked as unpreferred on Hackage."
+                 , "Proceeding to downgrade it to this version anyway because"
+                 , "you explicitly asked for."
+                 ]
+
+unprDowngradeRefused :: HasCallStack => PosixPath -> Version -> PackageIdentifier -> CLI ()
+unprDowngradeRefused path ver pkgId =
+  fatal $ PP.hsep [ "You requested to update"
+                  , prettyAnsi path
+                  , "to version"
+                  , prettyAnsi ver
+                  , "but it's older than the current version"
+                  , prettyAnsi (pkgVersion pkgId) <> PP.pretty '.'
+                  , "The requested version is also marked as unpreferred on Hackage."
+                  , "If you really want to downgrade it to this version, re-run"
+                  , command "update"
+                  , "with"
+                  , option "-f"
+                  ]
+
 deprUpdateForced :: HasCallStack => PosixPath -> Version -> CLI ()
 deprUpdateForced path ver =
   warn $ PP.hsep [ "You requested to update"
@@ -186,7 +240,7 @@ deprUpdateForced path ver =
                  , prettyAnsi ver
                  , "but it's been marked as deprecated on Hackage,"
                  , "which usually means it has known defects."
-                 , "Proceeding to use this version anyway because you explicitly asked to."
+                 , "Proceeding to use this version anyway because you explicitly asked for."
                  ]
 
 deprUpdateRefused :: HasCallStack => PosixPath -> Version -> CLI ()
@@ -224,7 +278,8 @@ deprDowngradeForced path ver pkgId =
                  , prettyAnsi (pkgVersion pkgId) <> PP.pretty '.'
                  , "The requested version is also marked as deprecated on Hackage,"
                  , "which usually means it has known defects."
-                 , "Proceeding to downgrade it to this version anyway because you explicitly asked to."
+                 , "Proceeding to downgrade it to this version anyway because"
+                 , "you explicitly asked for."
                  ]
 
 deprDowngradeRefused :: HasCallStack => PosixPath -> Version -> PackageIdentifier -> CLI ()
@@ -261,7 +316,7 @@ noUpstreamForced path =
                  , "is assuming that the package has lost its upstream."
                  , "Proceeding to set"
                  , prettyAnsi (Quoted "MASTER_SITES")
-                 , "to empty because you explicitly asked to."
+                 , "to empty because you explicitly asked for."
                  ]
 
 noUpstreamRefused :: HasCallStack => PosixPath -> CLI ()

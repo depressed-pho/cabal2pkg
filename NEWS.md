@@ -13,6 +13,9 @@
   `cabal2pkg` is intended to be used while the pkgsrc tree is in an
   inconsistent state where it isn't always possible to rebuild `cabal2pkg`
   immediately after updating GHC.
+* Fixed an issue where `cabal2pkg update` aborts with an error for some
+  packages on Hackage. It failed when the package to be updated had
+  versions marked as `unpreferred` in its version list.
 
 ## 0.1.1 -- 2025-01-11
 

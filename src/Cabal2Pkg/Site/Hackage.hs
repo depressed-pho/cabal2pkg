@@ -153,6 +153,8 @@ renderHackageDist (HackageDist name mVer) =
 data PackageStatus =
     -- ^This version is good to use.
     Normal
+    -- ^Use of this version is unpreferred by its upstream.
+  | Unpreferred
     -- ^This version has known defects.
   | Deprecated
   deriving (Eq, Show)
@@ -187,8 +189,9 @@ latestPreferred :: HasCallStack => AvailableVersions -> Version
 latestPreferred = fst . fromJust . find p . M.toDescList . unAV
   where
     p :: (Version, PackageStatus) -> Bool
-    p (_, Normal    ) = True
-    p (_, Deprecated) = False
+    p (_, Normal     ) = True
+    p (_, Unpreferred) = False
+    p (_, Deprecated ) = False
 
 -- |Fetch the set of available versions for a given package.
 fetchAvailableVersions :: PackageName -> CLI AvailableVersions
