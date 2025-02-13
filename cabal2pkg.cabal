@@ -84,6 +84,8 @@ executable cabal2pkg
         Data.Text.Lazy.Merge
         Database.Pkgsrc.SrcDb
         Language.BMake.AST
+        Language.BMake.AST.Pretty
+        Language.BMake.AST.Types
         PackageInfo_cabal2pkg
         System.File.PosixPath.Alt
         System.Directory.PosixPath
