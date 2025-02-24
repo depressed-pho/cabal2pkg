@@ -576,6 +576,19 @@ stripMakefileRev = TL.unlines . filter p . TL.lines
       | "PKGREVISION=" `TL.isPrefixOf` line = False
       | otherwise                           = True
 
+-- |Strip HASKELL_UNRESTRICT_DEPENDENCIES from a Makefile. These should be
+-- completely overwritten rather than patched, because its value is not
+-- determined solely by the package itself but also by the surrounding
+-- environment (i.e. the versions of packages it depends on, including ones
+-- that come along with GHC), and the environment might have changed since
+-- when the last time the package was updated. Computing two sets of
+-- packages that should be listed in HASKELL_UNRESTRICT_DEPENDENCIES for
+-- the older and the newer one, and taking a diff between them, therefore
+-- doesn't make sense and creates merge conflicts that aren't worth
+-- resolving by hand.
+stripUnrestrict :: TL.Text -> TL.Text
+stripUnrestrict = error "FIXME: not implemented"
+
 -- |Strip PKGREVISION from a buildlink3.mk, because it should be reset
 -- whenever a package is updated.
 stripBl3Rev :: TL.Text -> TL.Text

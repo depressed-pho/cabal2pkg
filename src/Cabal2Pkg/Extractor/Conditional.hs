@@ -28,7 +28,7 @@ import Distribution.Types.Version (Version)
 import Distribution.Types.VersionRange (VersionRange, withinRange)
 import GHC.Generics (Generic, Generically(..))
 import GHC.Stack (HasCallStack)
-import Language.BMake.AST ((?==))
+import Language.BMake.AST.Plain ((?==), PlainAST)
 import Language.BMake.AST qualified as AST
 import Lens.Micro.Platform ((&), (^.), (%~), (.~), makeLenses)
 import UnliftIO.Async (Conc, runConc)
@@ -66,7 +66,7 @@ data Condition
   | Or  !Condition !Condition
   | And !Condition !Condition
   | Expr
-    { expression :: !AST.Expr
+    { expression :: !(AST.Expr PlainAST)
       -- |'True' iff the expression depends on variables defined in
       -- @../../mk/bsd.fast.prefs.mk@
     , needsPrefs :: !Bool
@@ -232,7 +232,7 @@ extractArchCond arch
     c archName
       = c' $ "${MACHINE_ARCH}" ?== "\"" <> archName <> "\""
 
-    c' :: AST.Expr -> Condition
+    c' :: AST.Expr PlainAST -> Condition
     c' expr
       = Expr
         { expression = expr

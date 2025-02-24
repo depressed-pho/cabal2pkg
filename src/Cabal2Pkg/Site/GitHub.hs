@@ -25,7 +25,8 @@ import Database.Pkgsrc.SrcDb (Package)
 import Database.Pkgsrc.SrcDb qualified as SrcDb
 import Distribution.Pretty (prettyShow)
 import Distribution.Types.Version (Version)
-import Language.BMake.AST ((.=), Block(..))
+import Language.BMake.AST (Block(..))
+import Language.BMake.AST.Plain ((.=), PlainAST)
 import Lens.Micro.Platform ((%~))
 import Network.URI (URI, pathSegments)
 import Network.URI.Lens (uriPathLens)
@@ -132,7 +133,7 @@ renderGitHubDist (Release {..}) =
                          ]
 
 -- |See pkgsrc @mk/fetch/github.mk@
-genGitHubMasterSites :: Text -> Version -> GitHubDist -> [Block]
+genGitHubMasterSites :: Text -> Version -> GitHubDist -> [Block PlainAST]
 genGitHubMasterSites pkgBase ver dist =
   [ "MASTER_SITES" .= ["${MASTER_SITE_GITHUB:=" <> ghAccount dist <> "/}"] ]
   <> [ "GITHUB_PROJECT" .= [ghProject dist]
