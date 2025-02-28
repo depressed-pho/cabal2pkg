@@ -25,6 +25,7 @@ category:           Distribution
 build-type:         Simple
 extra-source-files:
     doc/cabal2pkg.8
+    tests/data/**/*.mk
 extra-doc-files:
     NEWS.md
     README.md
@@ -43,7 +44,8 @@ flag threaded
     manual: True
     default: True
 
-common warnings
+common common-flags
+    default-language: GHC2021
     ghc-options:
         -Wall
         -Wextra
@@ -51,14 +53,23 @@ common warnings
         -- This is an undocumented warning. We have no idea what it means.
         -Wno-overlapping-patterns
 
-executable cabal2pkg
-    import:           warnings
-    main-is:          Main.hs
+common exec-flags
+    import: common-flags
+
+    if flag(rtsopts)
+        ghc-options: -rtsopts
+
+    if flag(threaded)
+        ghc-options: -threaded
+
+library
+    import: common-flags
+    hs-source-dirs: lib
 
     autogen-modules:
         PackageInfo_cabal2pkg
 
-    other-modules:
+    exposed-modules:
         Cabal2Pkg.CmdLine
         Cabal2Pkg.Command.Common
         Cabal2Pkg.Command.Init
@@ -91,7 +102,7 @@ executable cabal2pkg
         Language.BMake.AST
         Language.BMake.AST.ExactPrint
         Language.BMake.AST.Extension
-        Language.BMake.AST.Parser
+        Language.BMake.AST.Parse
         Language.BMake.AST.Plain
         Language.BMake.AST.Pretty
         Language.BMake.AST.Types
@@ -147,11 +158,30 @@ executable cabal2pkg
       , unliftio-core        ^>= 0.2.1
       , unordered-containers ^>= 0.2.20
 
-    if flag(rtsopts)
-        ghc-options: -rtsopts
+executable cabal2pkg
+    import:  exec-flags
+    main-is: src/Main.hs
+    build-depends:
+        base      == 4.*
+      , cabal2pkg
 
-    if flag(threaded)
-        ghc-options: -threaded
+test-suite cabal2pkg-tests
+    import:         exec-flags
+    ghc-options:    -F -pgmF=tasty-autocollect
+    type:           exitcode-stdio-1.0
+    hs-source-dirs: tests
+    main-is:        test.hs
 
-    hs-source-dirs:   src
-    default-language: GHC2021
+    other-modules:
+        Test.Language.BMake.AST.Parse
+
+    build-tool-depends:
+        tasty-autocollect:tasty-autocollect ^>= 0.4.4
+
+    build-depends:
+        base               == 4.*
+      , cabal2pkg
+      , file-embed        ^>= 0.0.16
+      , tasty             ^>= 1.5.3
+      , tasty-autocollect ^>= 0.4.4
+      , tasty-hunit       ^>= 0.10.2

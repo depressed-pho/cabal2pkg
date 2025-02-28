@@ -1,11 +1,21 @@
+CABAL_ARGS= \
+	--enable-executable-dynamic \
+	--disable-optimization \
+	--allow-newer \
+	--test-options="+RTS -N -RTS"
+
 .PHONY: all
 all:
-	cabal build
+	cabal ${CABAL_ARGS} build
 
 .PHONY: clean
 clean:
 	cabal clean
 	rm -rf .hie
+
+.PHONY: test
+test:
+	cabal ${CABAL_ARGS} test
 
 PAGER?= less
 .PHONY: lint

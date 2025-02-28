@@ -6,8 +6,8 @@ module Language.BMake.AST.ExactPrint
     ExactPrint
 
     -- * AST annotations
-  , Whitespace
-  , EndOfLine
+  , Whitespace(..)
+  , EndOfLine(..)
 
     -- * Parsing and exact-printing
   , parseMakefile
@@ -16,6 +16,7 @@ module Language.BMake.AST.ExactPrint
 import Control.Applicative ((<|>))
 import Control.Monad (unless, void, when)
 import Data.Data (Data)
+import Data.String (IsString)
 import Data.Attoparsec.Text.Lazy (Parser)
 import Data.Attoparsec.Text.Lazy qualified as AL
 import Data.List.NonEmpty (NonEmpty)
@@ -26,7 +27,7 @@ import Data.Text.Lazy qualified as TL
 import Data.Text.Lazy.Builder (Builder)
 import Data.Text.Lazy.Builder qualified as TLB
 import Language.BMake.AST.Extension
-import Language.BMake.AST.Parser (Parsable(..))
+import Language.BMake.AST.Parse (Parsable(..))
 import Language.BMake.AST.Pretty (Pretty(..))
 import Language.BMake.AST.Types
 import Prettyprinter qualified as PP
@@ -65,7 +66,7 @@ type instance XBreak       ExactPrint = (Whitespace, Whitespace, Whitespace, End
 
 newtype Whitespace = Whitespace Text
   deriving stock   (Data, Eq, Show)
-  deriving newtype (Semigroup, Monoid)
+  deriving newtype (IsString, Semigroup, Monoid)
 
 instance Parsable Whitespace where
   parse = Whitespace . fst <$> AL.match go
@@ -125,9 +126,13 @@ instance Parsable (Block ExactPrint) where
                     ]
 
 instance Parsable (Blank ExactPrint) where
-  parse = do ts <- parse
-             c  <- optionalComment
-             e  <- parse
+  parse = do end <- AL.atEnd
+             when end $
+               -- Prevent an infinite loop.
+               fail "Blank should not match EOL"
+             ts  <- parse
+             c   <- optionalComment
+             e   <- parse
              pure (Blank (ts, e) c)
 
 instance Pretty (Blank ExactPrint) where
@@ -185,7 +190,7 @@ instance Parsable (Assignment ExactPrint) where
                    | c == '=' ->
                        -- Found an equal sign before any other relevant
                        -- symbols. It's the end of the variable name.
-                       pure (nameB, mempty, Set)
+                       AL.anyChar *> pure (nameB, mempty, Set)
 
                    | c == '+' || c == '?' || c == ':' || c == '!' ->
                        -- These symbols may be a part of an assignment

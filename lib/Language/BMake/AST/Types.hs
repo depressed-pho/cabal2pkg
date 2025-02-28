@@ -45,6 +45,7 @@ import Data.List.NonEmpty (NonEmpty)
 import Data.MonoTraversable
   ( Element, GrowingAppend, MonoFoldable(..), MonoFunctor(..)
   , MonoPointed(..) )
+import Data.String (IsString(..))
 import Data.Text (Text)
 import Language.BMake.AST.Extension
 import Prelude hiding (Ordering(..))
@@ -64,6 +65,8 @@ data Comment x = Comment !(XComment x) !Text
 deriving instance (Data x, Data (XComment x)) => Data (Comment x)
 deriving instance Show (XComment x) => Show (Comment x)
 deriving instance Eq   (XComment x) => Eq   (Comment x)
+instance XComment x ~ () => IsString (Comment x) where
+  fromString = Comment () . fromString
 
 data Block x
   = BBlank      !(Blank x)

@@ -1,5 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
-module Language.BMake.AST.Parser
+module Language.BMake.AST.Parse
   ( Parsable(..)
   ) where
 
