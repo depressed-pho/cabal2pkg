@@ -14,6 +14,9 @@ module Language.BMake.AST.Extension
   , XExportAll
   , XUnexportEnv
   , XUndef
+  , XConditional
+  , XElse
+  , XEndIf
   , XIf
   , XIfdef
   , XIfmake
@@ -22,6 +25,9 @@ module Language.BMake.AST.Extension
   , XAnd
   , XExpr
   , XECompare
+  , XFor
+  , XEndFor
+  , XBreak
   ) where
 
 type family XComment     x
@@ -36,6 +42,9 @@ type family XExport      x
 type family XExportAll   x
 type family XUnexportEnv x
 type family XUndef       x
+type family XConditional x
+type family XElse        x
+type family XEndIf       x
 type family XIf          x
 type family XIfdef       x
 type family XIfmake      x
@@ -44,3 +53,6 @@ type family XOr          x
 type family XAnd         x
 type family XExpr        x
 type family XECompare    x
+type family XFor         x
+type family XEndFor      x
+type family XBreak       x

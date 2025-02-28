@@ -53,6 +53,11 @@ type instance XExport      PlainAST = ()
 type instance XExportAll   PlainAST = ()
 type instance XUnexportEnv PlainAST = ()
 type instance XUndef       PlainAST = ()
+-- |Whether to indent the contents of this conditional. This should usually
+-- be 'True'.
+type instance XConditional PlainAST = Bool
+type instance XElse        PlainAST = ()
+type instance XEndIf       PlainAST = ()
 type instance XIf          PlainAST = ()
 type instance XIfdef       PlainAST = ()
 type instance XIfmake      PlainAST = ()
@@ -61,6 +66,9 @@ type instance XOr          PlainAST = ()
 type instance XAnd         PlainAST = ()
 type instance XExpr        PlainAST = ()
 type instance XECompare    PlainAST = ()
+type instance XFor         PlainAST = ()
+type instance XEndFor      PlainAST = ()
+type instance XBreak       PlainAST = ()
 
 tabWidth :: Integral n => n
 tabWidth = 8
@@ -135,7 +143,6 @@ instance IsString (Value PlainAST) where
 instance Pretty (Rule PlainAST) where
   pretty _ (Rule {..}) =
     mconcat [ pretty () rDependency
-            , PP.line
             , mconcat $ pretty () <$> rCommands
             ]
 
@@ -146,6 +153,7 @@ instance Pretty (Dependency PlainAST) where
               , PP.space
               , pretty () dSources
               , pprOptionalComment dComment
+              , PP.line
               ]
 
 instance Pretty (ShellCmd PlainAST) where
@@ -160,18 +168,17 @@ instance Pretty (ShellCmd PlainAST) where
 instance Pretty (Directive PlainAST) where
   -- |The current depth of nested directives.
   type Context (Directive PlainAST) = Int
-  pretty depth dir = go <> PP.line
-    where
-      go :: Doc ann
-      go = case dir of
-             DInclude     inc  -> pretty depth inc
-             DMessage     msg  -> pretty depth msg
-             DExport      exp  -> pretty depth exp
-             DExportAll   exa  -> pretty depth exa
-             DUnexportEnv uxe  -> pretty depth uxe
-             DUndef       und  -> pretty depth und
-             DConditional cond -> pretty depth cond
-             DFor         for  -> pretty depth for
+  pretty depth dir =
+    case dir of
+      DInclude     inc  -> pretty depth inc
+      DMessage     msg  -> pretty depth msg
+      DExport      exp  -> pretty depth exp
+      DExportAll   exa  -> pretty depth exa
+      DUnexportEnv uxe  -> pretty depth uxe
+      DUndef       und  -> pretty depth und
+      DConditional cond -> pretty depth cond
+      DFor         for  -> pretty depth for
+      DBreak       brk  -> pretty depth brk
 
 instance Pretty (Include PlainAST) where
   -- |The current depth of nested directives.
@@ -184,6 +191,7 @@ instance Pretty (Include PlainAST) where
                 System -> PP.angles  . PP.pretty $ iPath
                 User   -> PP.dquotes . PP.pretty $ iPath
             , pprOptionalComment iComment
+            , PP.line
             ]
 
 instance Pretty (Message PlainAST) where
@@ -198,6 +206,7 @@ instance Pretty (Message PlainAST) where
             , PP.space
             , pretty () msgText
             , pprOptionalComment msgComment
+            , PP.line
             ]
 
 instance Pretty (Export PlainAST) where
@@ -213,6 +222,7 @@ instance Pretty (Export PlainAST) where
             , PP.space
             , pretty () expVars
             , pprOptionalComment expComment
+            , PP.line
             ]
 
 instance Pretty (ExportAll PlainAST) where
@@ -222,6 +232,7 @@ instance Pretty (ExportAll PlainAST) where
     mconcat [ dotSpace depth
             , "export-all"
             , pprOptionalComment com
+            , PP.line
             ]
 
 instance Pretty (UnexportEnv PlainAST) where
@@ -231,6 +242,7 @@ instance Pretty (UnexportEnv PlainAST) where
     mconcat [ dotSpace depth
             , "unexport-env"
             , pprOptionalComment com
+            , PP.line
             ]
 
 instance Pretty (Undef PlainAST) where
@@ -242,22 +254,21 @@ instance Pretty (Undef PlainAST) where
             , PP.space
             , pretty () var
             , pprOptionalComment com
+            , PP.line
             ]
 
 instance Pretty (Conditional PlainAST) where
   -- |The current depth of nested directives.
   type Context (Conditional PlainAST) = Int
   pretty depth (Conditional {..}) =
-    mconcat [ pprBranches branches
-            , pprElse elseBranch
-            , dotSpace depth
-            , "endif"
-            , pprOptionalComment endComment
+    mconcat [ pprBranches condBranches
+            , foldMap (pretty (depth, contentDepth)) condElse
+            , pretty depth condEnd
             ]
     where
       contentDepth :: Int
       contentDepth
-        | indent    = depth + 1
+        | condExt   = depth + 1
         | otherwise = depth
 
       pprBranches :: NonEmpty (CondBranch PlainAST) -> Doc ann
@@ -265,11 +276,23 @@ instance Pretty (Conditional PlainAST) where
         = pretty (True, contentDepth) br <>
           mconcat (pretty (False, contentDepth) <$> brs)
 
-      pprElse :: Maybe (Maybe (Comment PlainAST), Makefile PlainAST) -> Doc ann
-      pprElse Nothing         = mempty
-      pprElse (Just (com, m)) = PP.vsep [ dotSpace depth <> "else" <> pprOptionalComment com
-                                        , pretty contentDepth m
-                                        ]
+instance Pretty (Else PlainAST) where
+  -- |The current and the content depth of nested directives.
+  type Context (Else PlainAST) = (Int, Int)
+  pretty (depth, contentDepth) (Else _ com mk) =
+    PP.vsep [ dotSpace depth <> "else" <> pprOptionalComment com
+            , pretty contentDepth mk
+            ]
+
+instance Pretty (EndIf PlainAST) where
+  -- |The current depth of nested directives.
+  type Context (EndIf PlainAST) = Int
+  pretty depth (EndIf _ com) =
+    mconcat [ dotSpace depth
+            , "endif"
+            , pprOptionalComment com
+            , PP.line
+            ]
 
 instance Pretty (CondBranch PlainAST) where
   -- |The 'Bool' value indicates whether the branch is the first one,
@@ -336,9 +359,46 @@ instance Pretty (Expr PlainAST) where
 instance Pretty (ForLoop PlainAST) where
   -- |The current depth of nested directives.
   type Context (ForLoop PlainAST) = Int
-  pretty depth (ForLoop vars expr body) =
-    PP.vsep [ dotSpace depth <> "for" <+> pretty () vars <+> "in" <+> pretty () expr
-            , pretty (depth + 1) body <> dotSpace depth <> "endfor"
+  pretty depth (ForLoop for body end) =
+    mconcat [ pretty depth for
+            , pretty (depth + 1) body
+            , pretty depth end
+            ]
+
+instance Pretty (For PlainAST) where
+  -- |The current depth of nested directives.
+  type Context (For PlainAST) = Int
+  pretty depth (For {..}) =
+    mconcat [ dotSpace depth
+            , "for"
+            , PP.space
+            , pretty () forVars
+            , PP.space
+            , "in"
+            , PP.space
+            , pretty () forExpr
+            , pprOptionalComment forComment
+            , PP.line
+            ]
+
+instance Pretty (EndFor PlainAST) where
+  -- |The current depth of nested directives.
+  type Context (EndFor PlainAST) = Int
+  pretty depth (EndFor _ com) =
+    mconcat [ dotSpace depth
+            , "endfor"
+            , pprOptionalComment com
+            , PP.line
+            ]
+
+instance Pretty (Break PlainAST) where
+  -- |The current depth of nested directives.
+  type Context (Break PlainAST) = Int
+  pretty depth (Break _ com) =
+    mconcat [ dotSpace depth
+            , "break"
+            , pprOptionalComment com
+            , PP.line
             ]
 
 pprAssignments :: Foldable t => t (Assignment PlainAST) -> Doc ann

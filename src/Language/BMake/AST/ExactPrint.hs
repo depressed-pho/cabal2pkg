@@ -8,6 +8,9 @@ module Language.BMake.AST.ExactPrint
     -- * AST annotations
   , Whitespace
   , EndOfLine
+
+    -- * Parsing and exact-printing
+  , parseMakefile
   ) where
 
 import Control.Applicative ((<|>))
@@ -15,6 +18,7 @@ import Control.Monad (unless, void, when)
 import Data.Data (Data)
 import Data.Attoparsec.Text.Lazy (Parser)
 import Data.Attoparsec.Text.Lazy qualified as AL
+import Data.List.NonEmpty (NonEmpty)
 import Data.List.NonEmpty qualified as NE
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -43,6 +47,10 @@ type instance XMessage     ExactPrint = (Whitespace, Whitespace, Whitespace, End
 type instance XExport      ExactPrint = (Whitespace, Whitespace, Whitespace, EndOfLine)
 type instance XExportAll   ExactPrint = (Whitespace, Whitespace, Whitespace, EndOfLine)
 type instance XUnexportEnv ExactPrint = (Whitespace, Whitespace, Whitespace, EndOfLine)
+type instance XUndef       ExactPrint = (Whitespace, Whitespace, Whitespace, EndOfLine)
+type instance XConditional ExactPrint = ()
+type instance XElse        ExactPrint = (Whitespace, Whitespace, Whitespace)
+type instance XEndIf       ExactPrint = (Whitespace, Whitespace, Whitespace, EndOfLine)
 type instance XIf          ExactPrint = (Whitespace, Whitespace)
 type instance XIfdef       ExactPrint = (Whitespace, Whitespace)
 type instance XIfmake      ExactPrint = (Whitespace, Whitespace)
@@ -51,6 +59,9 @@ type instance XOr          ExactPrint = (Bool, Whitespace, Whitespace)
 type instance XAnd         ExactPrint = (Bool, Whitespace, Whitespace)
 type instance XExpr        ExactPrint = (Bool, Whitespace, Whitespace)
 type instance XECompare    ExactPrint = Whitespace
+type instance XFor         ExactPrint = (Whitespace, Whitespace, Whitespace)
+type instance XEndFor      ExactPrint = (Whitespace, Whitespace, Whitespace, EndOfLine)
+type instance XBreak       ExactPrint = (Whitespace, Whitespace, Whitespace, EndOfLine)
 
 newtype Whitespace = Whitespace Text
   deriving stock   (Data, Eq, Show)
@@ -89,6 +100,9 @@ instance Pretty EndOfLine where
   pretty _ EOL = PP.line
   pretty _ EOF = mempty
 
+instance Parsable (Makefile ExactPrint) where
+  parse = Makefile <$> AL.many' parse
+
 instance Parsable (Comment ExactPrint) where
   parse = do _ <- AL.char '#'
              c <- AL.takeTill (== '\n')
@@ -102,6 +116,13 @@ instance Pretty (Comment ExactPrint) where
 
 optionalComment :: Parser (Maybe (Comment ExactPrint))
 optionalComment = AL.option Nothing (Just <$> parse)
+
+instance Parsable (Block ExactPrint) where
+  parse = AL.choice [ BBlank      <$> parse
+                    , BAssignment <$> parse
+                    , BRule       <$> parse
+                    , BDirective  <$> parse
+                    ]
 
 instance Parsable (Blank ExactPrint) where
   parse = do ts <- parse
@@ -231,6 +252,18 @@ instance Parsable (ShellCmd ExactPrint) where
              e   <- parse
              pure $ ShellCmd (bs, e) ms cmd com
 
+instance Parsable (Directive ExactPrint) where
+  parse = AL.choice [ DInclude     <$> parse
+                    , DMessage     <$> parse
+                    , DExport      <$> parse
+                    , DExportAll   <$> parse
+                    , DUnexportEnv <$> parse
+                    , DUndef       <$> parse
+                    , DConditional <$> parse
+                    , DFor         <$> parse
+                    , DBreak       <$> parse
+                    ]
+
 instance Parsable (Include ExactPrint) where
   parse = do s0   <- parse
              _    <- AL.char '.'
@@ -298,10 +331,60 @@ instance Parsable (UnexportEnv ExactPrint) where
              e   <- parse
              pure $ UnexportEnv (s0, s1, s2, e) com
 
-{-
+instance Parsable (Undef ExactPrint) where
+  parse = do s0  <- parse
+             _   <- AL.char '.'
+             s1  <- parse
+             _   <- AL.string "undef"
+             s2  <- parse
+             vs  <- AL.many' parse
+             com <- optionalComment
+             e   <- parse
+             pure $ Undef (s0, s1, s2, e) vs com
+
 instance Parsable (Conditional ExactPrint) where
-  parse =
--}
+  parse = do branches <- parseBranches
+             else_    <- AL.option Nothing (Just <$> parse)
+             end      <- parse
+             pure $ Conditional () branches else_ end
+    where
+      parseBranches :: Parser (NonEmpty (CondBranch ExactPrint))
+      parseBranches =
+        do b  <- parseCondBranch True
+           bs <- AL.many' $ parseCondBranch False
+           pure $ NE.fromList (b:bs)
+
+instance Parsable (Else ExactPrint) where
+  parse = do s0  <- parse
+             _   <- AL.char '.'
+             s1  <- parse
+             _   <- AL.string "else"
+             s2  <- parse
+             com <- optionalComment
+             -- No need to save EndOfLine because no Makefiles can legally
+             -- end with ".else".
+             _   <- AL.char '\n'
+             mk  <- parse
+             pure $ Else (s0, s1, s2) com mk
+
+instance Parsable (EndIf ExactPrint) where
+  parse = do s0  <- parse
+             _   <- AL.char '.'
+             s1  <- parse
+             _   <- AL.string "endif"
+             s2  <- parse
+             com <- optionalComment
+             e   <- parse
+             pure $ EndIf (s0, s1, s2, e) com
+
+-- |See 'parseCondition'.
+parseCondBranch :: Bool -> Parser (CondBranch ExactPrint)
+parseCondBranch isFirst =
+  do cond <- parseCondition isFirst
+     -- The Parsable instance for (Makefile a) eats up everything but
+     -- unnested ".elif*", ".else", or ".endif".
+     mk   <- parse
+     pure $ CondBranch cond mk
 
 -- |@'parseCondition' isFirst@ parses a 'Condition' where @isFirst@ denotes
 -- whether the condition is the first one in a chain (i.e. @.if@, @.ifdef@,
@@ -409,3 +492,41 @@ instance Parsable (Expr ExactPrint) where
            s0  <- parse
            rhs <- parse
            pure $ ECompare s0 lhs (Just (op, rhs))
+
+instance Parsable (ForLoop ExactPrint) where
+  parse = ForLoop <$> parse <*> parse <*> parse
+
+instance Parsable (For ExactPrint) where
+  parse = do s0   <- parse
+             _    <- AL.char '.'
+             s1   <- parse
+             _    <- AL.string "for"
+             s2   <- parse
+             vs   <- AL.many1' parse
+             expr <- parse
+             com  <- optionalComment
+             _    <- AL.char '\n'
+             pure $ For (s0, s1, s2) vs expr com
+
+instance Parsable (EndFor ExactPrint) where
+  parse = do s0  <- parse
+             _   <- AL.char '.'
+             s1  <- parse
+             _   <- AL.string "endfor"
+             s2  <- parse
+             com <- optionalComment
+             e   <- parse
+             pure $ EndFor (s0, s1, s2, e) com
+
+instance Parsable (Break ExactPrint) where
+  parse = do s0  <- parse
+             _   <- AL.char '.'
+             s1  <- parse
+             _   <- AL.string "break"
+             s2  <- parse
+             com <- optionalComment
+             e   <- parse
+             pure $ Break (s0, s1, s2, e) com
+
+parseMakefile :: TL.Text -> Either String (Makefile ExactPrint)
+parseMakefile = AL.parseOnly (parse <* AL.endOfInput)

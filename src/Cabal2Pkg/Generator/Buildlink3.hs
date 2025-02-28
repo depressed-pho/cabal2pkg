@@ -47,12 +47,12 @@ genAST pm =
       where
         guarded' :: AST.Conditional PlainAST
         guarded' = AST.Conditional
-                   { AST.branches   = AST.CondBranch cond mk :| []
-                   , AST.elseBranch = Nothing
-                   , AST.endComment = case guardVar of
-                                        AST.Value _ name ->
-                                          Just $ AST.Comment () name
-                   , AST.indent     = False
+                   { AST.condExt      = False
+                   , AST.condBranches = AST.CondBranch cond mk :| []
+                   , AST.condElse     = Nothing
+                   , AST.condEnd      = case guardVar of
+                                          AST.Value _ name ->
+                                            AST.EndIf () . Just $ AST.Comment () name
                    }
 
         cond :: AST.Condition PlainAST

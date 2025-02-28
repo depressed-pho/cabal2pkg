@@ -27,12 +27,17 @@ module Language.BMake.AST.Types
   , UnexportEnv(..)
   , Undef(..)
   , Conditional(..)
+  , Else(..)
+  , EndIf(..)
   , CondBranch(..)
   , Condition(..)
   , LogicalExpr(..)
   , RelationalOp(..)
   , Expr(..)
   , ForLoop(..)
+  , For(..)
+  , EndFor(..)
+  , Break(..)
   ) where
 
 import Data.Data (Data)
@@ -217,6 +222,7 @@ data Directive x
   | DUndef       !(Undef x)        -- ^@.undef VARIABLE@
   | DConditional !(Conditional x)  -- ^@.if@ and its families
   | DFor         !(ForLoop x)      -- ^@.for@
+  | DBreak       !(Break x)        -- ^@.break@
 deriving instance ( Data x
                   , Data (Include x)
                   , Data (Message x)
@@ -226,6 +232,7 @@ deriving instance ( Data x
                   , Data (Undef x)
                   , Data (Conditional x)
                   , Data (ForLoop x)
+                  , Data (Break x)
                   ) => Data (Directive x)
 deriving instance ( Show (Include x)
                   , Show (Message x)
@@ -235,6 +242,7 @@ deriving instance ( Show (Include x)
                   , Show (Undef x)
                   , Show (Conditional x)
                   , Show (ForLoop x)
+                  , Show (Break x)
                   ) => Show (Directive x)
 deriving instance ( Eq   (Include x)
                   , Eq   (Message x)
@@ -244,6 +252,7 @@ deriving instance ( Eq   (Include x)
                   , Eq   (Undef x)
                   , Eq   (Conditional x)
                   , Eq   (ForLoop x)
+                  , Eq   (Break x)
                   ) => Eq   (Directive x)
 
 data Include x =
@@ -349,7 +358,7 @@ deriving instance ( Eq   (XUnexportEnv x)
                   , Eq   (Comment x)
                   ) => Eq   (UnexportEnv x)
 
-data Undef x = Undef !(XUndef x) !(Value x) !(Maybe (Comment x))
+data Undef x = Undef !(XUndef x) ![Value x] !(Maybe (Comment x))
 deriving instance ( Data x
                   , Data (XUndef x)
                   , Data (Value x)
@@ -366,41 +375,71 @@ deriving instance ( Eq (XUndef x)
 
 data Conditional x
   = Conditional
-    { branches   :: !(NonEmpty (CondBranch x))
-    , elseBranch :: !(Maybe (Maybe (Comment x), Makefile x)) -- ^@.else@
-    , endComment :: !(Maybe (Comment x))
-    -- |Whether to indent the contents of this conditional. This should
-    -- usually be 'True'.
-    , indent     :: !Bool
+    { condExt      :: !(XConditional x)
+    , condBranches :: !(NonEmpty (CondBranch x))
+    , condElse     :: !(Maybe (Else x))
+    , condEnd      :: !(EndIf x)
     }
 deriving instance ( Data x
+                  , Data (XConditional x)
                   , Data (CondBranch x)
-                  , Data (Makefile x)
-                  , Data (Comment x)
+                  , Data (Else x)
+                  , Data (EndIf x)
                   ) => Data (Conditional x)
-deriving instance ( Show (CondBranch x)
-                  , Show (Makefile x)
-                  , Show (Comment x)
+deriving instance ( Show (XConditional x)
+                  , Show (CondBranch x)
+                  , Show (Else x)
+                  , Show (EndIf x)
                   ) => Show (Conditional x)
-deriving instance ( Eq   (CondBranch x)
-                  , Eq   (Makefile x)
-                  , Eq   (Comment x)
+deriving instance ( Eq   (XConditional x)
+                  , Eq   (CondBranch x)
+                  , Eq   (Else x)
+                  , Eq   (EndIf x)
                   ) => Eq   (Conditional x)
 
 instance Semigroup (Conditional x) where
   ca <> cb
-    = case elseBranch ca of
+    = case condElse ca of
         Nothing ->
           -- ca has no .else block, which means we can merge ca and cb
           -- without nesting them.
-          ca { branches   = branches ca <> branches cb
-             , elseBranch = elseBranch cb
+          ca { condBranches = condBranches ca <> condBranches cb
+             , condElse     = condElse cb
              }
 
-        Just (com, ea) ->
-          -- ca has a .else block, which means we must put cb inside the
+        Just (Else ext com ea) ->
+          -- ca has an .else block, which means we must put cb inside the
           -- block.
-          ca { elseBranch = Just (com, ea <> Makefile [BDirective (DConditional cb)]) }
+          ca { condElse = Just (Else ext com $ ea <> Makefile [BDirective $ DConditional cb]) }
+
+-- |@.else@
+data Else x = Else !(XElse x) !(Maybe (Comment x)) !(Makefile x)
+deriving instance ( Data x
+                  , Data (XElse x)
+                  , Data (Makefile x)
+                  , Data (Comment x)
+                  ) => Data (Else x)
+deriving instance ( Show (XElse x)
+                  , Show (Makefile x)
+                  , Show (Comment x)
+                  ) => Show (Else x)
+deriving instance ( Eq   (XElse x)
+                  , Eq   (Makefile x)
+                  , Eq   (Comment x)
+                  ) => Eq   (Else x)
+
+-- |@.endif@
+data EndIf x = EndIf !(XEndIf x) !(Maybe (Comment x))
+deriving instance ( Data x
+                  , Data (XEndIf x)
+                  , Data (Comment x)
+                  ) => Data (EndIf x)
+deriving instance ( Show (XEndIf x)
+                  , Show (Comment x)
+                  ) => Show (EndIf x)
+deriving instance ( Eq   (XEndIf x)
+                  , Eq   (Comment x)
+                  ) => Eq   (EndIf x)
 
 data CondBranch x = CondBranch !(Condition x) !(Makefile x)
 deriving instance ( Data x
@@ -504,14 +543,62 @@ deriving instance ( Eq   (Value x)
                   , Eq   (Value x)
                   ) => Eq   (Expr x)
 
-data ForLoop x = ForLoop ![Value x] !Text !(Makefile x)
+data ForLoop x = ForLoop !(For x) !(Makefile x) !(EndFor x)
 deriving instance ( Data x
-                  , Data (Value x)
+                  , Data (For x)
                   , Data (Makefile x)
+                  , Data (EndFor x)
                   ) => Data (ForLoop x)
-deriving instance ( Show (Value x)
+deriving instance ( Show (For x)
                   , Show (Makefile x)
+                  , Show (EndFor x)
                   ) => Show (ForLoop x)
-deriving instance ( Eq   (Value x)
+deriving instance ( Eq   (For x)
                   , Eq   (Makefile x)
+                  , Eq   (EndFor x)
                   ) => Eq   (ForLoop x)
+
+data For x =
+  For
+  { forExt     :: !(XFor x)
+  , forVars    :: ![Value x]
+  , forExpr    :: !UnstructuredText
+  , forComment :: !(Maybe (Comment x))
+  }
+deriving instance ( Data x
+                  , Data (XFor x)
+                  , Data (Value x)
+                  , Data (Comment x)
+                  ) => Data (For x)
+deriving instance ( Show (XFor x)
+                  , Show (Value x)
+                  , Show (Comment x)
+                  ) => Show (For x)
+deriving instance ( Eq   (XFor x)
+                  , Eq   (Value x)
+                  , Eq   (Comment x)
+                  ) => Eq   (For x)
+
+data EndFor x = EndFor !(XEndFor x) !(Maybe (Comment x))
+deriving instance ( Data x
+                  , Data (XEndFor x)
+                  , Data (Comment x)
+                  ) => Data (EndFor x)
+deriving instance ( Show (XEndFor x)
+                  , Show (Comment x)
+                  ) => Show (EndFor x)
+deriving instance ( Eq   (XEndFor x)
+                  , Eq   (Comment x)
+                  ) => Eq   (EndFor x)
+
+data Break x = Break !(XBreak x) !(Maybe (Comment x))
+deriving instance ( Data x
+                  , Data (XBreak x)
+                  , Data (Comment x)
+                  ) => Data (Break x)
+deriving instance ( Show (XBreak x)
+                  , Show (Comment x)
+                  ) => Show (Break x)
+deriving instance ( Eq   (XBreak x)
+                  , Eq   (Comment x)
+                  ) => Eq   (Break x)

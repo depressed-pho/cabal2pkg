@@ -330,11 +330,11 @@ genDepsAST pm cm bl
 
         clAST :: AST.Conditional PlainAST
         clAST = AST.Conditional
-                { branches   = (:| []) $
-                               AST.CondBranch conAST (genDepsAST pm cm (br ^. ifTrue))
-                , elseBranch = (Nothing, ) . genDepsAST pm cm <$> br ^. ifFalse
-                , endComment = Nothing
-                , indent     = True
+                { condExt      = True
+                , condBranches = (:| []) $
+                                 AST.CondBranch conAST (genDepsAST pm cm (br ^. ifTrue))
+                , condElse     = AST.Else () Nothing . genDepsAST pm cm <$> br ^. ifFalse
+                , condEnd      = AST.EndIf () Nothing
                 }
 
 genConditionAST :: HasCallStack => Condition -> AST.Condition PlainAST

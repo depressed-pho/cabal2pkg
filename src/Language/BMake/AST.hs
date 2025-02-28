@@ -3,11 +3,14 @@ module Language.BMake.AST
     module Language.BMake.AST.Extension
   , module Language.BMake.AST.Types
   , PlainAST
+  , ExactPrint
 
-    -- * Pretty-printing
+    -- * Parsing and pretty-printing
+  , parseMakefile
   , prettyPrintMakefile
   ) where
 
+import Language.BMake.AST.ExactPrint (ExactPrint, parseMakefile)
 import Language.BMake.AST.Extension
 import Language.BMake.AST.Plain (PlainAST)
 import Language.BMake.AST.Pretty (prettyPrintMakefile)
