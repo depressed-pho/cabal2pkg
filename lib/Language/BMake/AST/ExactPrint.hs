@@ -37,32 +37,34 @@ import Prettyprinter qualified as PP
 -- the original Makefile has, including whitespaces, and can be
 -- pretty-printed back to exactly the same Makefile.
 data ExactPrint
-type instance XComment     ExactPrint = ()
-type instance XBlank       ExactPrint = (Whitespace, EndOfLine)
-type instance XAssignment  ExactPrint = (Whitespace, Whitespace, EndOfLine)
-type instance XValue       ExactPrint = Whitespace
-type instance XDependency  ExactPrint = (Whitespace, Whitespace, EndOfLine)
-type instance XShellCmd    ExactPrint = ([Blank ExactPrint], EndOfLine)
-type instance XInclude     ExactPrint = (Whitespace, Whitespace, Whitespace, EndOfLine)
-type instance XMessage     ExactPrint = (Whitespace, Whitespace, Whitespace, EndOfLine)
-type instance XExport      ExactPrint = (Whitespace, Whitespace, Whitespace, EndOfLine)
-type instance XExportAll   ExactPrint = (Whitespace, Whitespace, Whitespace, EndOfLine)
-type instance XUnexportEnv ExactPrint = (Whitespace, Whitespace, Whitespace, EndOfLine)
-type instance XUndef       ExactPrint = (Whitespace, Whitespace, Whitespace, EndOfLine)
-type instance XConditional ExactPrint = ()
-type instance XElse        ExactPrint = (Whitespace, Whitespace, Whitespace)
-type instance XEndIf       ExactPrint = (Whitespace, Whitespace, Whitespace, EndOfLine)
-type instance XIf          ExactPrint = (Whitespace, Whitespace)
-type instance XIfdef       ExactPrint = (Whitespace, Whitespace)
-type instance XIfmake      ExactPrint = (Whitespace, Whitespace)
-type instance XNot         ExactPrint = (Bool, Whitespace, Whitespace)
-type instance XOr          ExactPrint = (Bool, Whitespace, Whitespace)
-type instance XAnd         ExactPrint = (Bool, Whitespace, Whitespace)
-type instance XExpr        ExactPrint = (Bool, Whitespace, Whitespace)
-type instance XECompare    ExactPrint = Whitespace
-type instance XFor         ExactPrint = (Whitespace, Whitespace, Whitespace)
-type instance XEndFor      ExactPrint = (Whitespace, Whitespace, Whitespace, EndOfLine)
-type instance XBreak       ExactPrint = (Whitespace, Whitespace, Whitespace, EndOfLine)
+type instance XComment     ExactPrint   = ()
+type instance XBlank       ExactPrint   = (Whitespace, EndOfLine)
+type instance XAssignment  ExactPrint   = (Whitespace, Whitespace, EndOfLine)
+type instance XValue       ExactPrint   = Whitespace
+type instance XDependency  ExactPrint   = (Whitespace, Whitespace, EndOfLine)
+type instance XShellCmd    ExactPrint   = ([Blank ExactPrint], EndOfLine)
+type instance XInclude     ExactPrint   = (Whitespace, Whitespace, Whitespace, EndOfLine)
+type instance XMessage     ExactPrint   = (Whitespace, Whitespace, Whitespace, EndOfLine)
+type instance XExport      ExactPrint   = (Whitespace, Whitespace, Whitespace, EndOfLine)
+type instance XExportAll   ExactPrint   = (Whitespace, Whitespace, Whitespace, EndOfLine)
+type instance XUnexportEnv ExactPrint   = (Whitespace, Whitespace, Whitespace, EndOfLine)
+type instance XUndef       ExactPrint   = (Whitespace, Whitespace, Whitespace, EndOfLine)
+type instance XConditional ExactPrint   = ()
+type instance XElse        ExactPrint   = (Whitespace, Whitespace, Whitespace)
+type instance XEndIf       ExactPrint   = (Whitespace, Whitespace, Whitespace, EndOfLine)
+type instance XIf          ExactPrint   = (Whitespace, Whitespace)
+type instance XIfdef       ExactPrint   = (Whitespace, Whitespace)
+type instance XIfmake      ExactPrint   = (Whitespace, Whitespace)
+type instance XNot         ExactPrint   = ()
+type instance XAnd         ExactPrint   = ()
+type instance XOr          ExactPrint   = ()
+type instance XExpr        ExactPrint   = (Whitespace, Whitespace)
+-- |A logical expression in parentheses.
+type instance XExpLE       ExactPrint a = (Whitespace, Whitespace, LogicalExpr ExactPrint a)
+type instance XECompare    ExactPrint   = Whitespace
+type instance XFor         ExactPrint   = (Whitespace, Whitespace, Whitespace)
+type instance XEndFor      ExactPrint   = (Whitespace, Whitespace, Whitespace, EndOfLine)
+type instance XBreak       ExactPrint   = (Whitespace, Whitespace, Whitespace, EndOfLine)
 
 newtype Whitespace = Whitespace Text
   deriving stock   (Data, Eq, Show)
@@ -423,49 +425,57 @@ parseCondition isFirst =
         Ifmake (s0, s1) n <$> parse <*> optionalComment
 
 instance Parsable a => Parsable (LogicalExpr ExactPrint a) where
-  parse = parse >>= parseParen
+  -- Here we use the following grammar (in ABNF) to avoid infinite loops on
+  -- left recursion. Hope it's equivalent to what bmake actually does:
+  --
+  --   logical-expr = not-expr
+  --   not-expr     = ["!"] and-expr
+  --   and-expr     = or-expr *("&&" or-expr)
+  --   or-expr      = paren-expr *("||" paren-expr)
+  --   paren-expr   = "(" logical-expr ")" / expr
+  --
+  parse = parse >>= parseLE
     where
+      parseLE :: Whitespace -> Parser (LogicalExpr ExactPrint a)
+      parseLE = parseNot
+
+      parseNot :: Whitespace -> Parser (LogicalExpr ExactPrint a)
+      parseNot s0 =
+        ( do _  <- AL.char '!'
+             le <- parseAnd s0
+             pure $ Not () le
+        )
+        <|> parseAnd s0
+
+      parseAnd :: Whitespace -> Parser (LogicalExpr ExactPrint a)
+      parseAnd s0 =
+        do le  <- parseOr s0
+           les <- AL.many' $ AL.string "&&" *> (parse >>= parseOr)
+           if null les
+             then pure le
+             else pure . And () $ NE.fromList (le : les)
+
+      parseOr :: Whitespace -> Parser (LogicalExpr ExactPrint a)
+      parseOr s0 =
+        do le  <- parseParen s0
+           les <- AL.many' $ AL.string "||" *> (parse >>= parseParen)
+           if null les
+             then pure le
+             else pure . Or () $ NE.fromList (le : les)
+
       parseParen :: Whitespace -> Parser (LogicalExpr ExactPrint a)
       parseParen s0 =
         ( do _  <- AL.char '('
-             le <- parseLE
+             le <- parse >>= parseLE
              _  <- AL.char ')'
              s1 <- parse
-             pure $ le True s0 s1
+             pure $ ExpLE (s0, s1, le)
         )
         <|>
-        ( do le <- parseLE
-             s1 <- parse
-             pure $ le False s0 s1
+        ( do expr <- parse
+             s1   <- parse
+             pure $ Expr (s0, s1) expr
         )
-
-      parseLE :: Parser (Bool -> Whitespace -> Whitespace -> LogicalExpr ExactPrint a)
-      parseLE = AL.choice [ parseNot
-                          , parseOr
-                          , parseAnd
-                          , parseExpr
-                          ]
-
-      parseNot :: Parser (Bool -> Whitespace -> Whitespace -> LogicalExpr ExactPrint a)
-      parseNot =
-        do _  <- AL.char '!'
-           le <- parse
-           pure $ \hasParen s0 s1 -> Not (hasParen, s0, s1) le
-
-      parseOr :: Parser (Bool -> Whitespace -> Whitespace -> LogicalExpr ExactPrint a)
-      parseOr =
-        do les <- NE.fromList <$> parse `AL.sepBy1'` (AL.string "||")
-           pure $ \hasParen s0 s1 -> Or (hasParen, s0, s1) les
-
-      parseAnd :: Parser (Bool -> Whitespace -> Whitespace -> LogicalExpr ExactPrint a)
-      parseAnd =
-        do les <- NE.fromList <$> parse `AL.sepBy1'` (AL.string "&&")
-           pure $ \hasParen s0 s1 -> And (hasParen, s0, s1) les
-
-      parseExpr :: Parser (Bool -> Whitespace -> Whitespace -> LogicalExpr ExactPrint a)
-      parseExpr =
-        do expr <- parse
-           pure $ \hasParen s0 s1 -> Expr (hasParen, s0, s1) expr
 
 instance Parsable (Expr ExactPrint) where
   parse = AL.choice [ EDefined  <$> parseFunc "defined"

@@ -21,9 +21,10 @@ module Language.BMake.AST.Extension
   , XIfdef
   , XIfmake
   , XNot
-  , XOr
   , XAnd
+  , XOr
   , XExpr
+  , XExpLE
   , XECompare
   , XFor
   , XEndFor
@@ -49,9 +50,10 @@ type family XIf          x
 type family XIfdef       x
 type family XIfmake      x
 type family XNot         x
-type family XOr          x
 type family XAnd         x
+type family XOr          x
 type family XExpr        x
+type family XExpLE       x a
 type family XECompare    x
 type family XFor         x
 type family XEndFor      x

@@ -27,6 +27,7 @@ import Data.String (IsString(..))
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
+import Data.Void (Void)
 import Language.BMake.AST.Extension
 import Language.BMake.AST.Pretty (Pretty(..))
 import Language.BMake.AST.Types
@@ -41,34 +42,35 @@ import Prettyprinter.Render.Text qualified as PT
 data PlainAST
   deriving (Data)
 
-type instance XComment     PlainAST = ()
-type instance XBlank       PlainAST = ()
-type instance XAssignment  PlainAST = ()
-type instance XValue       PlainAST = ()
-type instance XDependency  PlainAST = ()
-type instance XShellCmd    PlainAST = ()
-type instance XInclude     PlainAST = ()
-type instance XMessage     PlainAST = ()
-type instance XExport      PlainAST = ()
-type instance XExportAll   PlainAST = ()
-type instance XUnexportEnv PlainAST = ()
-type instance XUndef       PlainAST = ()
+type instance XComment     PlainAST   = ()
+type instance XBlank       PlainAST   = ()
+type instance XAssignment  PlainAST   = ()
+type instance XValue       PlainAST   = ()
+type instance XDependency  PlainAST   = ()
+type instance XShellCmd    PlainAST   = ()
+type instance XInclude     PlainAST   = ()
+type instance XMessage     PlainAST   = ()
+type instance XExport      PlainAST   = ()
+type instance XExportAll   PlainAST   = ()
+type instance XUnexportEnv PlainAST   = ()
+type instance XUndef       PlainAST   = ()
 -- |Whether to indent the contents of this conditional. This should usually
 -- be 'True'.
-type instance XConditional PlainAST = Bool
-type instance XElse        PlainAST = ()
-type instance XEndIf       PlainAST = ()
-type instance XIf          PlainAST = ()
-type instance XIfdef       PlainAST = ()
-type instance XIfmake      PlainAST = ()
-type instance XNot         PlainAST = ()
-type instance XOr          PlainAST = ()
-type instance XAnd         PlainAST = ()
-type instance XExpr        PlainAST = ()
-type instance XECompare    PlainAST = ()
-type instance XFor         PlainAST = ()
-type instance XEndFor      PlainAST = ()
-type instance XBreak       PlainAST = ()
+type instance XConditional PlainAST   = Bool
+type instance XElse        PlainAST   = ()
+type instance XEndIf       PlainAST   = ()
+type instance XIf          PlainAST   = ()
+type instance XIfdef       PlainAST   = ()
+type instance XIfmake      PlainAST   = ()
+type instance XNot         PlainAST   = ()
+type instance XAnd         PlainAST   = ()
+type instance XOr          PlainAST   = ()
+type instance XExpr        PlainAST   = ()
+type instance XExpLE       PlainAST a = Void
+type instance XECompare    PlainAST   = ()
+type instance XFor         PlainAST   = ()
+type instance XEndFor      PlainAST   = ()
+type instance XBreak       PlainAST   = ()
 
 tabWidth :: Integral n => n
 tabWidth = 8

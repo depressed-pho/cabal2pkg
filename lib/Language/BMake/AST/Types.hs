@@ -487,28 +487,32 @@ deriving instance ( Eq   (XIf x)
                   ) => Eq   (Condition x)
 
 data LogicalExpr x a
-  = Not  !(XNot  x) !(LogicalExpr x a)  -- ^@!@
+  = Not  !(XNot  x) !(LogicalExpr x a)            -- ^@!@, which is of higher precedence than @&&@.
+  | And  !(XAnd  x) !(NonEmpty (LogicalExpr x a)) -- ^@&&@, which is of higher precedence than @||@.
   | Or   !(XOr   x) !(NonEmpty (LogicalExpr x a)) -- ^@||@
-  | And  !(XAnd  x) !(NonEmpty (LogicalExpr x a)) -- ^@&&@
   | Expr !(XExpr x) !a
+  | ExpLE !(XExpLE x a)                           -- ^Extended constructor
 deriving instance ( Data x
                   , Data a
-                  , Data (XNot  x)
-                  , Data (XOr   x)
-                  , Data (XAnd  x)
-                  , Data (XExpr x)
+                  , Data (XNot   x)
+                  , Data (XOr    x)
+                  , Data (XAnd   x)
+                  , Data (XExpr  x)
+                  , Data (XExpLE x a)
                   ) => Data (LogicalExpr x a)
 deriving instance ( Show a
-                  , Show (XNot  x)
-                  , Show (XOr   x)
-                  , Show (XAnd  x)
-                  , Show (XExpr x)
+                  , Show (XNot   x)
+                  , Show (XOr    x)
+                  , Show (XAnd   x)
+                  , Show (XExpr  x)
+                  , Show (XExpLE x a)
                   ) => Show (LogicalExpr x a)
 deriving instance ( Eq   a
-                  , Eq   (XNot  x)
-                  , Eq   (XOr   x)
-                  , Eq   (XAnd  x)
-                  , Eq   (XExpr x)
+                  , Eq   (XNot   x)
+                  , Eq   (XOr    x)
+                  , Eq   (XAnd   x)
+                  , Eq   (XExpr  x)
+                  , Eq   (XExpLE x a)
                   ) => Eq   (LogicalExpr x a)
 
 data RelationalOp
