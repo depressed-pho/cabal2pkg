@@ -18,7 +18,7 @@ module Language.BMake.AST.ExactPrint
 import Control.Applicative ((<|>))
 import Control.Monad (unless, void, when)
 import Data.Data (Data)
-import Data.Foldable1 (foldlMap1')
+import Data.Foldable1 (foldMap1', foldlMap1')
 import Data.String (IsString)
 import Data.Attoparsec.Text.Lazy (Parser)
 import Data.Attoparsec.Text.Lazy qualified as AL
@@ -308,7 +308,7 @@ instance Pretty (Rule ExactPrint) where
 
 instance Parsable (Dependency ExactPrint) where
   parse = do s0 <- parse
-             ts <- AL.many1' parse
+             ts <- NE.fromList <$> AL.many1' parse
              ty <- parse
              s1 <- parse
              ss <- AL.many' parse
@@ -320,7 +320,7 @@ instance Pretty (Dependency ExactPrint) where
   pretty _ (Dependency {..})
     | (s0, s1, e) <- dExt =
         mconcat [ pretty () s0
-                , mconcat $ pretty () <$> dTargets
+                , foldMap1' (pretty ()) dTargets
                 , pretty () dType
                 , pretty () s1
                 , mconcat $ pretty () <$> dSources
@@ -813,18 +813,33 @@ instance Pretty (ForLoop ExactPrint) where
             ]
 
 instance Parsable (For ExactPrint) where
-  parse = do s0   <- parse
-             _    <- AL.char '.'
-             s1   <- parse
-             _    <- AL.string "for"
-             s2   <- parse
-             vs   <- AL.many1' parse
-             _    <- AL.string "in"
-             s3   <- parse
-             expr <- parse
-             com  <- parseComment
-             _    <- AL.char '\n'
+  parse = do s0       <- parse
+             _        <- AL.char '.'
+             s1       <- parse
+             _        <- AL.string "for"
+             s2       <- parse
+             (vs, s3) <- parseVarsIn
+             expr     <- parse
+             com      <- parseComment
+             _        <- AL.char '\n'
              pure $ For (s0, s1, s2, s3) vs expr com
+    where
+      parseVarsIn :: Parser (NonEmpty (Value ExactPrint), Whitespace)
+      parseVarsIn =
+        do v        <- parse
+           (vs, s3) <- go
+           pure ((v :| vs), s3)
+
+      go :: Parser ([Value ExactPrint], Whitespace)
+      go = ( do _  <- AL.string "in"
+                s3 <- parse
+                pure ([], s3)
+           )
+           <|>
+           ( do v        <- parse
+                (vs, s3) <- go
+                pure ((v:vs), s3)
+           )
 
 instance Pretty (For ExactPrint) where
   pretty _ (For {..})
@@ -834,7 +849,7 @@ instance Pretty (For ExactPrint) where
                 , pretty () s1
                 , "for"
                 , pretty () s2
-                , mconcat $ pretty () <$> forVars
+                , foldMap1' (pretty ()) forVars
                 , "in"
                 , pretty () s3
                 , pretty () forExpr

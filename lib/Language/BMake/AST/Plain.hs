@@ -21,6 +21,7 @@ module Language.BMake.AST.Plain
   ) where
 
 import Data.Data (Data)
+import Data.Foldable1 (foldlMap1')
 import Data.List.NonEmpty (NonEmpty((:|)))
 import Data.List.NonEmpty qualified as NE
 import Data.Maybe (isNothing)
@@ -153,7 +154,7 @@ instance Pretty (Rule PlainAST) where
 
 instance Pretty (Dependency PlainAST) where
   pretty _ (Dependency {..})
-    = mconcat [ PP.hsep $ pretty () <$> dTargets
+    = mconcat [ foldlMap1' (pretty ()) ((. pretty ()) . (<+>)) dTargets -- hsep doesn't work on Foldable
               , pretty () dType
               , PP.space
               , PP.hsep $ pretty () <$> dSources
@@ -376,7 +377,7 @@ instance Pretty (For PlainAST) where
     mconcat [ dotSpace depth
             , "for"
             , PP.space
-            , PP.hsep $ pretty () <$> forVars
+            , foldlMap1' (pretty ()) ((. pretty ()) . (<+>)) forVars -- hsep doesn't work on Foldable
             , PP.space
             , "in"
             , PP.space

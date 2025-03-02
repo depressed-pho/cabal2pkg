@@ -13,6 +13,7 @@ import Language.BMake.AST.ExactPrint (ExactPrint, EndOfLine(..))
 import Language.BMake.AST.Types
 import Test.Tasty.HUnit ((@?=), testCase)
 
+-- example-00
 ex00 :: TL.Text
 ex00 = $(makeRelativeToProject "tests/data/example-00.mk" >>= embedStringFile)
 
@@ -34,6 +35,7 @@ test =
   testCase "roundtrip example-00.mk" $
   exactPrintMakefile ex00' @?= ex00
 
+-- example-01
 ex01 :: TL.Text
 ex01 = $(makeRelativeToProject "tests/data/example-01.mk" >>= embedStringFile)
 
@@ -57,3 +59,32 @@ test =
 test =
   testCase "roundtrip example-01.mk" $
   exactPrintMakefile ex01' @?= ex01
+
+-- example-02
+ex02 :: TL.Text
+ex02 = $(makeRelativeToProject "tests/data/example-02.mk" >>= embedStringFile)
+
+ex02' :: Makefile ExactPrint
+ex02' = Makefile
+        [ BDirective . DFor $
+          ForLoop
+          ( For
+            ("", "", " ", " ")
+            (NE.fromList [Value " " "i"])
+            "foo bar baz "
+            (Just " comment")
+          )
+          ( Makefile
+            [ BAssignment $ Assignment ("", " ", EOL) (Value "" "VAR") Append [Value "" "${i}"] Nothing
+            ]
+          )
+          ( EndFor ("", "", "", EOL) Nothing )
+        ]
+
+test =
+  testCase "parse example-02.mk" $
+  parseMakefile ex02 @?= Right ex02'
+
+test =
+  testCase "roundtrip example-02.mk" $
+  exactPrintMakefile ex02' @?= ex02

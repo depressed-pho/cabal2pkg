@@ -146,7 +146,7 @@ deriving instance Show (XValue x) => Show (Value x)
 deriving instance Eq   (XValue x) => Eq   (Value x)
 
 newtype UnstructuredText = UnstructuredText Text
-  deriving (Data, Show, Eq)
+  deriving (Data, Show, Eq, IsString)
 
 data Rule x
   = Rule
@@ -167,7 +167,7 @@ deriving instance ( Eq   (Dependency x)
 data Dependency x =
   Dependency
   { dExt     :: !(XDependency x)
-  , dTargets :: ![Value x]
+  , dTargets :: !(NonEmpty (Value x))
   , dType    :: !DependencyType
   , dSources :: ![Value x]
   , dComment :: !(Maybe (Comment x))
@@ -568,7 +568,7 @@ deriving instance ( Eq   (For x)
 data For x =
   For
   { forExt     :: !(XFor x)
-  , forVars    :: ![Value x]
+  , forVars    :: !(NonEmpty (Value x))
   , forExpr    :: !UnstructuredText
   , forComment :: !(Maybe (Comment x))
   }
