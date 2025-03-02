@@ -1,11 +1,27 @@
+EXE?= cabal2pkg
+
+CABAL_ARGS= \
+	--enable-executable-dynamic \
+	--disable-optimization \
+	--allow-newer \
+	--test-options="+RTS -N -RTS"
+
 .PHONY: all
 all:
-	cabal build
+	cabal ${CABAL_ARGS} build
 
 .PHONY: clean
 clean:
 	cabal clean
 	rm -rf .hie
+
+.PHONY: test
+test:
+	cabal ${CABAL_ARGS} test
+
+.PHONY: run
+run:
+	cabal ${CABAL_ARGS} run ${EXE} -- ${ARGS}
 
 PAGER?= less
 .PHONY: lint

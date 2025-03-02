@@ -41,9 +41,9 @@ import Distribution.Types.Version qualified as C
 import Distribution.Types.VersionRange qualified as C
 import GHC.Stack (HasCallStack)
 import Language.BMake.AST
-  ( Makefile(..), Block(..), Directive(..), (#), (.=), (.+=), blank, include
-  , prettyPrintAST )
+  ( Makefile(..), Block(..), Directive(..), prettyPrintMakefile )
 import Language.BMake.AST qualified as AST
+import Language.BMake.AST.Plain ((#), (.=), (.+=), PlainAST, blank, include)
 import Lens.Micro.Platform ((&), (^.), (%~), (.~), to)
 import Network.URI (uriToString)
 import Network.URI.Lens (uriPathLens)
@@ -51,7 +51,7 @@ import System.FilePath.Posix qualified as FP
 
 
 genMakefile :: HasCallStack => PackageMeta -> TL.Text
-genMakefile = prettyPrintAST . genAST
+genMakefile = prettyPrintMakefile . genAST
 
 anywhere :: GenericQ Bool -> GenericQ Bool
 anywhere q = go
@@ -61,7 +61,7 @@ anywhere q = go
       | q x       = True
       | otherwise = gmapQl (||) False go x
 
-genAST :: HasCallStack => PackageMeta -> Makefile
+genAST :: HasCallStack => PackageMeta -> Makefile PlainAST
 genAST pm
   = mconcat [ header
             , toolsAndConfigArgs
@@ -71,7 +71,7 @@ genAST pm
             , footer
             ]
   where
-    header :: Makefile
+    header :: Makefile PlainAST
     header = Makefile
              $  [ blank # "$NetBSD$"
                 , blank
@@ -129,7 +129,7 @@ genAST pm
                        , T.pack . prettyShow . distVersion $ pm
                        ]
 
-    toolsAndConfigArgs :: Makefile
+    toolsAndConfigArgs :: Makefile PlainAST
     toolsAndConfigArgs
       = let section = useTools <> configArgs
         in
@@ -140,14 +140,15 @@ genAST pm
     -- The list of HASKELL_UNRESTRICT_DEPENDENCIES. They don't need to be
     -- conditionalised, so we gather all of them from the entire
     -- conditional tree.
-    maybeUnrestrictDeps :: Makefile
+    maybeUnrestrictDeps :: Makefile PlainAST
     maybeUnrestrictDeps
-      = if S.null depsToUnrestrict
-        then mempty
-        else Makefile [ "HASKELL_UNRESTRICT_DEPENDENCIES" .+=
-                        T.pack . prettyShow <$> S.toList depsToUnrestrict
-                      , blank
-                      ]
+      | S.null depsToUnrestrict =
+          mempty
+      | otherwise =
+          Makefile [ "HASKELL_UNRESTRICT_DEPENDENCIES" .+=
+                     T.pack . prettyShow <$> S.toList depsToUnrestrict
+                   , blank
+                   ]
       where
         depsToUnrestrict :: Set PackageName
         depsToUnrestrict = everything (<>) go pm
@@ -175,7 +176,7 @@ genAST pm
 
     -- If any of the conditionals depend of variables defined in
     -- "../../mk/bsd.fast.prefs.mk", include it here.
-    maybePrefs :: Makefile
+    maybePrefs :: Makefile PlainAST
     maybePrefs
       | anywhere go pm = Makefile [ include "../../mk/bsd.fast.prefs.mk"
                                   , blank
@@ -196,7 +197,7 @@ genAST pm
     -- component and at least one unconditional pkg-config dependency or an
     -- unconditional tool dependency.
     -- FIXME: What if we had pkg-config deps in other cases?
-    useTools :: Makefile
+    useTools :: Makefile PlainAST
     useTools
       = case components pm of
           [c] ->
@@ -219,7 +220,7 @@ genAST pm
               genExeDepsAST exeDeps'
           _ -> mempty
 
-    configArgs :: Makefile
+    configArgs :: Makefile PlainAST
     configArgs
       | M.null (flags pm) = mempty
       | otherwise
@@ -247,13 +248,13 @@ genAST pm
           cs ->
             cs
 
-    footer :: Makefile
+    footer :: Makefile PlainAST
     footer = Makefile
              [ include "../../mk/haskell.mk"
              , include "../../mk/bsd.pkg.mk"
              ]
 
-genMasterSites :: HasCallStack => PackageMeta -> [Block]
+genMasterSites :: HasCallStack => PackageMeta -> [Block PlainAST]
 genMasterSites pm =
   case origin pm of
     HTTP httpURI ->
@@ -280,24 +281,24 @@ genMasterSites pm =
 -- >
 -- > # exe:foo
 -- > .include "../../devel/hs-baz/buildlink3.mk"
-genComponentsAST :: HasCallStack => PackageMeta -> [ComponentMeta] -> Makefile
+genComponentsAST :: HasCallStack => PackageMeta -> [ComponentMeta] -> Makefile PlainAST
 genComponentsAST pm comps
   = case comps of
       [cm] -> genSingleComponentAST pm cm
       _    -> mconcat $ genMultiComponentAST pm <$> comps
 
-genSingleComponentAST :: HasCallStack => PackageMeta -> ComponentMeta -> Makefile
+genSingleComponentAST :: HasCallStack => PackageMeta -> ComponentMeta -> Makefile PlainAST
 genSingleComponentAST pm cm
   = genDepsAST pm cm (cm ^. cDeps)
 
-genMultiComponentAST :: HasCallStack => PackageMeta -> ComponentMeta -> Makefile
+genMultiComponentAST :: HasCallStack => PackageMeta -> ComponentMeta -> Makefile PlainAST
 genMultiComponentAST pm cm
   = mconcat [ header
             , genDepsAST pm cm (cm ^. cDeps)
             , footer
             ]
   where
-    header :: Makefile
+    header :: Makefile PlainAST
     header
       = let ty = case cm ^. cType of
                    Library    -> "lib"
@@ -306,79 +307,83 @@ genMultiComponentAST pm cm
         in
           Makefile [ blank # ty <> ":" <> cm ^. cName ]
 
-    footer :: Makefile
+    footer :: Makefile PlainAST
     footer = Makefile [ blank ]
 
-genDepsAST :: HasCallStack => PackageMeta -> ComponentMeta -> CondBlock DepSet -> Makefile
+genDepsAST :: HasCallStack => PackageMeta -> ComponentMeta -> CondBlock DepSet -> Makefile PlainAST
 genDepsAST pm cm bl
   = genDepSetAST pm cm (bl ^. always) <>
     genBranchesAST (bl ^. branches)
   where
-    genBranchesAST :: HasCallStack => [CondBranch DepSet] -> Makefile
+    genBranchesAST :: HasCallStack => [CondBranch DepSet] -> Makefile PlainAST
     genBranchesAST []       = mempty
     genBranchesAST (br:brs)
       = Makefile . (: []) . BDirective . DConditional $ genBranchesAST' (br :| brs)
 
-    genBranchesAST' :: HasCallStack => NonEmpty (CondBranch DepSet) -> AST.Conditional
+    genBranchesAST' :: HasCallStack => NonEmpty (CondBranch DepSet) -> AST.Conditional PlainAST
     genBranchesAST' (br :| brs)
       = case brs of
           []     -> clAST
           (x:xs) -> clAST <> genBranchesAST' (x :| xs)
       where
-        conAST :: HasCallStack => AST.Condition
+        conAST :: HasCallStack => AST.Condition PlainAST
         conAST = genConditionAST $ br ^. condition
 
-        clAST :: AST.Conditional
+        clAST :: AST.Conditional PlainAST
         clAST = AST.Conditional
-                { branches   = (:| []) $
-                               AST.CondBranch conAST (genDepsAST pm cm (br ^. ifTrue))
-                , else_      = genDepsAST pm cm <$> br ^. ifFalse
-                , endComment = Nothing
-                , indent     = True
+                { condExt      = True
+                , condBranches = (:| []) $
+                                 AST.CondBranch conAST (genDepsAST pm cm (br ^. ifTrue))
+                , condElse     = AST.Else () Nothing . genDepsAST pm cm <$> br ^. ifFalse
+                , condEnd      = AST.EndIf () Nothing
                 }
 
-genConditionAST :: HasCallStack => Condition -> AST.Condition
-genConditionAST = AST.If . go
+genConditionAST :: HasCallStack => Condition -> AST.Condition PlainAST
+genConditionAST = flip (AST.If () . go) Nothing
   where
-    go :: HasCallStack => Condition -> AST.LogicalExpr AST.Expr
+    go :: HasCallStack => Condition -> AST.LogicalExpr PlainAST (AST.Expr PlainAST)
     go c = case c of
              Literal {} -> error ("Literals should have been simplified before "
                                   <> "translating into bmake AST: " <> show c)
-             Not c'     -> AST.Not (go c')
-             Or  ca cb  -> flattenExpr $ AST.Or  [go ca, go cb]
-             And ca cb  -> flattenExpr $ AST.And [go ca, go cb]
-             Expr e _   -> AST.Expr e
+             Not c'     -> AST.Not () (go c')
+             Or  ca cb  -> flattenExpr $ AST.Or  () [go ca, go cb]
+             And ca cb  -> flattenExpr $ AST.And () [go ca, go cb]
+             Expr e _   -> AST.Expr () e
 
 -- |For each sub-expression in 'Or' or 'And', if it's also 'Or' or 'And'
 -- then merge it with the parent. That is, transform @a || (b || c)@ into @a
 -- || b || c@.
-flattenExpr :: HasCallStack => AST.LogicalExpr a -> AST.LogicalExpr a
-flattenExpr e@(AST.Not _ ) = e
-flattenExpr   (AST.Or  es) = flattenOr  es
-flattenExpr   (AST.And es) = flattenAnd es
-flattenExpr e@(AST.Expr _) = e
+flattenExpr :: HasCallStack => AST.LogicalExpr PlainAST a -> AST.LogicalExpr PlainAST a
+flattenExpr e@(AST.Not  _ _ ) = e
+flattenExpr   (AST.Or   _ es) = flattenOr  es
+flattenExpr   (AST.And  _ es) = flattenAnd es
+flattenExpr e@(AST.Expr _ _ ) = e
 
-flattenOr :: (HasCallStack, Foldable f) => f (AST.LogicalExpr a) -> AST.LogicalExpr a
-flattenOr = AST.Or . NE.fromList . foldr go []
+flattenOr :: (HasCallStack, Foldable f)
+          => f (AST.LogicalExpr PlainAST a)
+          ->    AST.LogicalExpr PlainAST a
+flattenOr = AST.Or () . NE.fromList . foldr go []
   where
     go e es
       = case flattenExpr e of
-          AST.Not _  -> e : es
-          AST.Or  es'-> NE.toList es' <> es
-          AST.And _  -> e : es
-          AST.Expr _ -> e : es
+          AST.Not  _ _   -> e : es
+          AST.Or   _ es' -> NE.toList es' <> es
+          AST.And  _ _   -> e : es
+          AST.Expr _ _   -> e : es
 
-flattenAnd :: (HasCallStack, Foldable f) => f (AST.LogicalExpr a) -> AST.LogicalExpr a
-flattenAnd = AST.And . NE.fromList . foldr go []
+flattenAnd :: (HasCallStack, Foldable f)
+           => f (AST.LogicalExpr PlainAST a)
+           ->    AST.LogicalExpr PlainAST a
+flattenAnd = AST.And () . NE.fromList . foldr go []
   where
     go e es
       = case flattenExpr e of
-          AST.Not _  -> e : es
-          AST.Or  _  -> e : es
-          AST.And es'-> NE.toList es' <> es
-          AST.Expr _ -> e : es
+          AST.Not  _ _   -> e : es
+          AST.Or   _ _   -> e : es
+          AST.And  _ es' -> NE.toList es' <> es
+          AST.Expr _ _   -> e : es
 
-genDepSetAST :: PackageMeta -> ComponentMeta -> DepSet -> Makefile
+genDepSetAST :: PackageMeta -> ComponentMeta -> DepSet -> Makefile PlainAST
 genDepSetAST pm cm ds
   = mconcat [ genExeDepsAST $ ds ^. exeDeps . to toList
             , mconcat $ genExtLibDepAST    <$> ds ^. extLibDeps  . to toList
@@ -386,7 +391,7 @@ genDepSetAST pm cm ds
             , mconcat $ genPkgConfDepAST   <$> ds ^. pkgConfDeps . to toList
             ]
 
-genExeDepsAST :: [ExeDep] -> Makefile
+genExeDepsAST :: [ExeDep] -> Makefile PlainAST
 genExeDepsAST es
   | null known && null unknown = mempty
   | otherwise                  = Makefile [ maybeUnknown $ "USE_TOOLS" .+= known ]
@@ -405,18 +410,18 @@ genExeDepsAST es
         go (KnownPkgsrcExe  {  }) = Nothing
         go (UnknownExe      {..}) = Just . T.pack . prettyShow $ name
 
-    maybeUnknown :: Block -> Block
+    maybeUnknown :: Block PlainAST -> Block PlainAST
     maybeUnknown bl
       = case unknown of
           []  -> bl
           [x] -> bl # "TODO: unknown tool: " <> x
           xs  -> bl # "TODO: unknown tools: " <> T.intercalate ", " xs
 
-genExtLibDepAST :: ExtLibDep -> Makefile
+genExtLibDepAST :: ExtLibDep -> Makefile PlainAST
 genExtLibDepAST (ExtLibDep name)
   = Makefile [ blank # "TODO: Include buildlink3.mk for " <> name ]
 
-genLibDepAST :: PackageMeta -> ComponentMeta -> LibDep -> Makefile
+genLibDepAST :: PackageMeta -> ComponentMeta -> LibDep -> Makefile PlainAST
 genLibDepAST pm cm libDep =
   case libDep of
     KnownBundledLib {  } -> mempty
@@ -441,6 +446,6 @@ genLibDepAST pm cm libDep =
                                  , "\" and include its buildlink3.mk"
                                  ] ]
 
-genPkgConfDepAST :: PkgConfDep -> Makefile
+genPkgConfDepAST :: PkgConfDep -> Makefile PlainAST
 genPkgConfDepAST (PkgConfDep name)
   = Makefile [ blank # "TODO: Include buildlink3.mk for " <> name ]

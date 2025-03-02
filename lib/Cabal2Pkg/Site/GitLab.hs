@@ -25,7 +25,8 @@ import Database.Pkgsrc.SrcDb (Package)
 import Database.Pkgsrc.SrcDb qualified as SrcDb
 import Distribution.Pretty (prettyShow)
 import Distribution.Types.Version (Version)
-import Language.BMake.AST ((.=), Block(..))
+import Language.BMake.AST (Block(..))
+import Language.BMake.AST.Plain ((.=), PlainAST)
 import Lens.Micro.Platform ((%~))
 import Network.URI (URI, pathSegments)
 import Network.URI.Lens (uriPathLens)
@@ -147,7 +148,7 @@ renderGitLabDist (Release {..}) =
                          ]
 
 -- |See pkgsrc @mk/fetch/gitlab.mk@
-genGitLabMasterSites :: Text -> Version -> GitLabDist -> [Block]
+genGitLabMasterSites :: Text -> Version -> GitLabDist -> [Block PlainAST]
 genGitLabMasterSites pkgBase ver dist =
   [ "MASTER_SITES" .= ["${MASTER_SITE_GITLAB:=" <> glAccount dist <> "/}"] ]
   <> [ "GITLAB_PROJECT" .= [glProject dist]
