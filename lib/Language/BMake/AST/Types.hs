@@ -140,7 +140,9 @@ data AssignmentOp
   | ExecThenSet    -- ^@!=@
   deriving (Data, Show, Eq)
 
-data Value x = Value (XValue x) Text
+data Value x = Value { vExt  :: !(XValue x)
+                     , vText :: !Text
+                     }
 deriving instance (Data x, Data (XValue x)) => Data (Value x)
 deriving instance Show (XValue x) => Show (Value x)
 deriving instance Eq   (XValue x) => Eq   (Value x)
@@ -525,12 +527,12 @@ data RelationalOp
   deriving (Data, Show, Eq)
 
 data Expr x
-  = EDefined  !(Value x) -- ^@defined(VARIABLE)@
-  | EMake     !(Value x) -- ^@make(TARGET)@
-  | EEmpty    !(Value x) -- ^@empty(VARIABLE)@
-  | EExists   !(Value x) -- ^@exists(FILE)@
-  | ETarget   !(Value x) -- ^@target(TARGET)@
-  | ECommands !(Value x) -- ^@commands(TARGET)@
+  = EDefined  !Text -- ^@defined(VARIABLE)@
+  | EMake     !Text -- ^@make(TARGET)@
+  | EEmpty    !Text -- ^@empty(VARIABLE)@
+  | EExists   !Text -- ^@exists(FILE)@
+  | ETarget   !Text -- ^@target(TARGET)@
+  | ECommands !Text -- ^@commands(TARGET)@
   | ECompare
     { eCmpExt :: !(XECompare x)
     , eCmpLHS :: !(Value x)

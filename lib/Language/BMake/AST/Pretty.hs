@@ -52,4 +52,3 @@ instance Pretty RelationalOp where
   pretty _ LE = "<="
   pretty _ GT = PP.rangle
   pretty _ GE = ">="
-

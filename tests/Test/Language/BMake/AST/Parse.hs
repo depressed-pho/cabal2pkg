@@ -44,7 +44,7 @@ ex01' = Makefile
         [ BDirective . DConditional $
           Conditional () ( NE.fromList
                            [ CondBranch
-                             (Ifdef ("", "") True (Expr (" ", "") (Value "" "FOO")) Nothing)
+                             (Ifdef ("", "", " ") True (Expr ("", "") (Value "" "FOO")) Nothing)
                              (Makefile [ BDirective . DInclude $
                                          Include ("", "  ", " ", "", EOL) Normal User "foo.mk" Nothing
                                        ])
@@ -88,3 +88,26 @@ test =
 test =
   testCase "roundtrip example-02.mk" $
   exactPrintMakefile ex02' @?= ex02
+
+-- example-03
+ex03 :: TL.Text
+ex03 = $(makeRelativeToProject "tests/data/example-03.mk" >>= embedStringFile)
+
+ex03' :: Makefile ExactPrint
+ex03' = Makefile
+        [ BDirective . DConditional $
+          Conditional () ( NE.fromList
+                           [ CondBranch
+                             (If ("", "", " ") (Not () (Expr ("", "") (EDefined "FOO"))) Nothing)
+                             (Makefile [BAssignment $ Assignment ("", "", EOL) (Value "" "FOO") ExpandThenSet [] Nothing])
+                           ]
+                         ) Nothing (EndIf ("", "", "", EOL) Nothing)
+        ]
+
+test =
+  testCase "parse example-03.mk" $
+  parseMakefile ex03 @?= Right ex03'
+
+test =
+  testCase "roundtrip example-03.mk" $
+  exactPrintMakefile ex03' @?= ex03

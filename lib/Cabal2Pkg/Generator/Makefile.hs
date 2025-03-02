@@ -142,12 +142,13 @@ genAST pm
     -- conditional tree.
     maybeUnrestrictDeps :: Makefile PlainAST
     maybeUnrestrictDeps
-      = if S.null depsToUnrestrict
-        then mempty
-        else Makefile [ "HASKELL_UNRESTRICT_DEPENDENCIES" .+=
-                        T.pack . prettyShow <$> S.toList depsToUnrestrict
-                      , blank
-                      ]
+      | S.null depsToUnrestrict =
+          mempty
+      | otherwise =
+          Makefile [ "HASKELL_UNRESTRICT_DEPENDENCIES" .+=
+                     T.pack . prettyShow <$> S.toList depsToUnrestrict
+                   , blank
+                   ]
       where
         depsToUnrestrict :: Set PackageName
         depsToUnrestrict = everything (<>) go pm

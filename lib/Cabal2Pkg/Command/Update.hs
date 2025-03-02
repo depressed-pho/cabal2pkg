@@ -7,7 +7,7 @@ module Cabal2Pkg.Command.Update
 
 import Cabal2Pkg.CmdLine
   ( CLI, UpdateOptions(..), FlagMap, debug, fatal, fillColumn, info, warn
-  , pkgPath, srcDb, distDir, canonPkgDir, origPkgDir, makeCmd, runMake
+  , srcDb, distDir, canonPkgDir, origPkgDir, pkgBase, pkgPath, makeCmd, runMake
   , withPkgFlagsHidden, withPkgFlagsModified, withMaintainer, withOwner
   , wantCommitMsg )
 import Cabal2Pkg.Command.Common
@@ -28,7 +28,9 @@ import Control.Monad (unless, when)
 import Control.Monad.Extra (maybeM)
 import Control.Monad.IO.Unlift (MonadUnliftIO)
 import Data.Char (isDigit)
-import Data.List qualified as L
+import Data.Coerce (coerce)
+import Data.Generics.Aliases (mkT)
+import Data.Generics.Schemes (everywhere)
 import Data.Map.Strict qualified as M
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -42,6 +44,9 @@ import Distribution.Types.Flag qualified as C
 import Distribution.Types.PackageId (PackageIdentifier(pkgName, pkgVersion))
 import Distribution.Types.Version (Version)
 import GHC.Stack (HasCallStack)
+import Language.BMake.AST
+  (ExactPrint, Makefile, exactPrintMakefile, parseMakefile)
+import Language.BMake.AST qualified as AST
 import Prelude hiding (readFile, writeFile)
 import Prettyprinter ((<+>), Doc)
 import Prettyprinter qualified as PP
@@ -464,11 +469,31 @@ applyChanges (UpdateOptions {..}) pkg oldMeta newMeta =
                              , T.pack . prettyShow . distVersion $ newMeta
                              , " (new)"
                              ]
-     let update :: PosixPath -> (PackageMeta -> TL.Text) -> (TL.Text -> TL.Text) -> CLI ()
+     let ppMakefile :: (Makefile ExactPrint -> Makefile ExactPrint)
+                    -> PosixPath
+                    -> TL.Text
+                    -> CLI TL.Text
+         ppMakefile ppAST name cur =
+           case parseMakefile cur of
+             Left msg ->
+               fatal $ PP.hsep [ "Failed to parse"
+                               , prettyAnsi name <> PP.colon
+                               , PP.pretty msg
+                               ]
+             Right ast ->
+               pure . exactPrintMakefile . ppAST $ ast
+
+         update :: PosixPath
+                -> (PackageMeta -> TL.Text)
+                -> (PosixPath -> TL.Text -> CLI TL.Text)
+                -> CLI ()
          update name gen preprocess =
-           do let base = gen oldMeta
-                  new  = gen newMeta
-              cur <- preprocess <$> readFile' name
+           do let new = gen newMeta
+              -- We are parsing and preprocessing Makefile we just
+              -- generated from oldMeta, which wastes CPU cycles but
+              -- there's no good way to avoid it.
+              base <- preprocess name (gen oldMeta)
+              cur  <- preprocess name =<< readFile' name
               let merged = merge optMarkerStyle
                                  (labelCur , cur )
                                  (labelBase, base)
@@ -495,10 +520,11 @@ applyChanges (UpdateOptions {..}) pkg oldMeta newMeta =
      -- These files are generated from the package description, and they
      -- should always exist.
      width <- fillColumn
-     update [pstr|DESCR|]    (genDESCR width) id
-     update [pstr|Makefile|] genMakefile stripMakefileRev
+     update [pstr|DESCR|]    (genDESCR width) (const (pure . id))
+     update [pstr|Makefile|] genMakefile (ppMakefile (stripUnrestrict . stripMakefileRev))
 
      -- buildlink3.mk is a tricky one.
+     pBase <- (T.pack <$>) . OP.decodeUtf =<< pkgBase
      let bl3 = [pstr|buildlink3.mk|]
      case shouldHaveBuildlink3 newMeta of
        Just False ->
@@ -510,7 +536,7 @@ applyChanges (UpdateOptions {..}) pkg oldMeta newMeta =
          -- The updated package should have buildlink3.mk. If the package
          -- currently doesn't have one, create it as if this were the
          -- "init" command.
-         update bl3 genBuildlink3 stripBl3Rev
+         update bl3 genBuildlink3 (ppMakefile (stripBl3Rev pBase))
          `catch` \(e :: IOError) ->
                    if isDoesNotExistError e then
                      updateFile' bl3 (genBuildlink3 newMeta)
@@ -521,7 +547,7 @@ applyChanges (UpdateOptions {..}) pkg oldMeta newMeta =
          -- The updated package may have buildlink3.mk but it doesn't have
          -- to. If the package currently has one, update it like any other
          -- files. Otherwise leave it non-existent.
-         update bl3 genBuildlink3 stripBl3Rev
+         update bl3 genBuildlink3 (ppMakefile (stripBl3Rev pBase))
          `catch` \(e :: IOError) ->
                    unless (isDoesNotExistError e) $
                      throw e
@@ -568,13 +594,14 @@ deleteBackup name =
 
 -- |Strip PKGREVISION from a Makefile, because it should be reset whenever
 -- a package is updated.
-stripMakefileRev :: TL.Text -> TL.Text
-stripMakefileRev = TL.unlines . filter p . TL.lines
+stripMakefileRev :: Makefile ExactPrint -> Makefile ExactPrint
+stripMakefileRev = coerce (filter p)
   where
-    p :: TL.Text -> Bool
-    p line
-      | "PKGREVISION=" `TL.isPrefixOf` line = False
-      | otherwise                           = True
+    p :: AST.Block ExactPrint -> Bool
+    p bl
+      | AST.BAssignment (AST.Assignment {..}) <- bl
+      , AST.Value _ var                       <- aVar = var /= "PKGREVISION"
+      | otherwise                                     = True
 
 -- |Strip HASKELL_UNRESTRICT_DEPENDENCIES from a Makefile. These should be
 -- completely overwritten rather than patched, because its value is not
@@ -586,25 +613,55 @@ stripMakefileRev = TL.unlines . filter p . TL.lines
 -- the older and the newer one, and taking a diff between them, therefore
 -- doesn't make sense and creates merge conflicts that aren't worth
 -- resolving by hand.
-stripUnrestrict :: TL.Text -> TL.Text
-stripUnrestrict = error "FIXME: not implemented"
+stripUnrestrict :: Makefile ExactPrint -> Makefile ExactPrint
+stripUnrestrict = everywhere (mkT f)
+  where
+    f :: Makefile ExactPrint -> Makefile ExactPrint
+    f = coerce go
+
+    go :: [AST.Block ExactPrint] -> [AST.Block ExactPrint]
+    go (b0:u:b1:xs)
+      -- The line we want to remove is enclosed by blank lines. In this
+      -- case we don't want to leave two blank lines: a single blank line
+      -- is enough.
+      | AST.BBlank (AST.Blank _ Nothing) <- b0
+      , AST.BAssignment as               <- u
+      , isUnrestrict as
+      , AST.BBlank (AST.Blank _ Nothing) <- b1 = b0 : go xs
+
+    go (x:xs)
+      | AST.BAssignment as <- x
+      , isUnrestrict as         = go xs
+      | otherwise               = x : go xs
+
+    go [] = []
+
+    isUnrestrict :: AST.Assignment x -> Bool
+    isUnrestrict (AST.Assignment {..})
+      | AST.Value _ var <- aVar =
+          var == "HASKELL_UNRESTRICT_DEPENDENCIES"
 
 -- |Strip PKGREVISION from a buildlink3.mk, because it should be reset
 -- whenever a package is updated.
-stripBl3Rev :: TL.Text -> TL.Text
-stripBl3Rev = TL.unlines . (go <$>) . TL.lines
+stripBl3Rev :: Text -> Makefile ExactPrint -> Makefile ExactPrint
+stripBl3Rev pBase = everywhere (mkT f)
   where
-    go :: TL.Text -> TL.Text
-    go line
-      | "BUILDLINK_ABI_DEPENDS." `TL.isPrefixOf` line =
-          -- Split the line with "nb" as a delimiter. If the last piece
-          -- consists only of digits, then it's clearly the revision we
-          -- want to remove.
-          case L.unsnoc (TL.splitOn "nb" line) of
-            Just (xs, x)
-              | TL.all isDigit x -> TL.intercalate "nb" xs
-            _ -> line
-      | otherwise = line
+    f :: AST.Block ExactPrint -> AST.Block ExactPrint
+    f bl
+      | AST.BAssignment as@(AST.Assignment {..}) <- bl
+      , AST.Value _ var                          <- aVar
+      , var == "BUILDLINK_ABI_DEPENDS." <> pBase =
+          AST.BAssignment $ as { AST.aValues = g <$> aValues }
+      | otherwise =
+          bl
+
+    -- Split the value with "nb" as a delimiter. If the last piece consists
+    -- only of digits, then it's clearly the revision we want to remove.
+    g :: AST.Value ExactPrint -> AST.Value ExactPrint
+    g v@(AST.Value {..}) =
+      case T.breakOnEnd "nb" vText of
+        (a, b) | T.all isDigit b -> v { AST.vText = T.dropEnd 2 a } -- Remove "nb" as well.
+               | otherwise       -> v
 
 readFile' :: PosixPath -> CLI TL.Text
 readFile' name =

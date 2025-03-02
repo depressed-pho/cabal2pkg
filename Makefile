@@ -1,3 +1,5 @@
+EXE?= cabal2pkg
+
 CABAL_ARGS= \
 	--enable-executable-dynamic \
 	--disable-optimization \
@@ -16,6 +18,10 @@ clean:
 .PHONY: test
 test:
 	cabal ${CABAL_ARGS} test
+
+.PHONY: run
+run:
+	cabal ${CABAL_ARGS} run ${EXE} -- ${ARGS}
 
 PAGER?= less
 .PHONY: lint

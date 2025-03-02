@@ -17,6 +17,7 @@ module Language.BMake.AST.ExactPrint
 
 import Control.Applicative ((<|>))
 import Control.Monad (unless, void, when)
+import Data.Coerce (coerce)
 import Data.Data (Data)
 import Data.Foldable1 (foldMap1', foldlMap1')
 import Data.String (IsString)
@@ -43,6 +44,8 @@ import Prettyprinter.Render.Text qualified as PT
 -- the original Makefile has, including whitespaces, and is supposed to be
 -- pretty-printable back to exactly the same Makefile.
 data ExactPrint
+  deriving (Data)
+
 type instance XComment     ExactPrint   = ()
 type instance XBlank       ExactPrint   = (Whitespace, EndOfLine)
 type instance XAssignment  ExactPrint   = (Whitespace, Whitespace, EndOfLine)
@@ -58,9 +61,9 @@ type instance XUndef       ExactPrint   = (Whitespace, Whitespace, Whitespace, E
 type instance XConditional ExactPrint   = ()
 type instance XElse        ExactPrint   = (Whitespace, Whitespace, Whitespace)
 type instance XEndIf       ExactPrint   = (Whitespace, Whitespace, Whitespace, EndOfLine)
-type instance XIf          ExactPrint   = (Whitespace, Whitespace)
-type instance XIfdef       ExactPrint   = (Whitespace, Whitespace)
-type instance XIfmake      ExactPrint   = (Whitespace, Whitespace)
+type instance XIf          ExactPrint   = (Whitespace, Whitespace, Whitespace)
+type instance XIfdef       ExactPrint   = (Whitespace, Whitespace, Whitespace)
+type instance XIfmake      ExactPrint   = (Whitespace, Whitespace, Whitespace)
 type instance XNot         ExactPrint   = ()
 type instance XAnd         ExactPrint   = ()
 type instance XOr          ExactPrint   = ()
@@ -75,6 +78,16 @@ type instance XBreak       ExactPrint   = (Whitespace, Whitespace, Whitespace, E
 newtype Whitespace = Whitespace Text
   deriving stock   (Data, Eq, Show)
   deriving newtype (IsString, Semigroup, Monoid)
+
+parseWs1 :: Parser Whitespace
+parseWs1 =
+  do s <- parse
+     when (nullWs s) $
+       fail "whitespace is mandatory here"
+     pure s
+  where
+    nullWs :: Whitespace -> Bool
+    nullWs = coerce T.null
 
 instance Parsable Whitespace where
   parse = Whitespace . fst <$> AL.match go
@@ -645,39 +658,44 @@ parseCondition isFirst =
       -- legally end with these.
       parseIf :: Whitespace -> Whitespace -> Parser (Condition ExactPrint)
       parseIf s0 s1 =
-        If (s0, s1) <$> parse <*> parseComment
+        do s2 <- parseWs1
+           If (s0, s1, s2) <$> parse <*> parseComment
 
       parseIfdef :: Whitespace -> Whitespace -> Bool -> Parser (Condition ExactPrint)
       parseIfdef s0 s1 n =
-        Ifdef (s0, s1) n <$> parse <*> parseComment
+        do s2 <- parseWs1
+           Ifdef (s0, s1, s2) n <$> parse <*> parseComment
 
       parseIfmake :: Whitespace -> Whitespace -> Bool -> Parser (Condition ExactPrint)
       parseIfmake s0 s1 n =
-        Ifmake (s0, s1) n <$> parse <*> parseComment
+        do s2 <- parseWs1
+           Ifmake (s0, s1, s2) n <$> parse <*> parseComment
 
 instance Pretty (Condition ExactPrint) where
   -- |Denotes whether the branch it's used by is the first one in a chain.
   type Context (Condition ExactPrint) = Bool
   pretty isFirst c
-    | If     (s0, s1)       le com <- c = pprCond s0 s1 "if"      le com
-    | Ifdef  (s0, s1) True  le com <- c = pprCond s0 s1 "ifdef"   le com
-    | Ifdef  (s0, s1) False le com <- c = pprCond s0 s1 "ifndef"  le com
-    | Ifmake (s0, s1) True  le com <- c = pprCond s0 s1 "ifmake"  le com
-    | Ifmake (s0, s1) False le com <- c = pprCond s0 s1 "ifnmake" le com
+    | If     (s0, s1, s2)       le com <- c = pprCond s0 s1 "if"      s2 le com
+    | Ifdef  (s0, s1, s2) True  le com <- c = pprCond s0 s1 "ifdef"   s2 le com
+    | Ifdef  (s0, s1, s2) False le com <- c = pprCond s0 s1 "ifndef"  s2 le com
+    | Ifmake (s0, s1, s2) True  le com <- c = pprCond s0 s1 "ifmake"  s2 le com
+    | Ifmake (s0, s1, s2) False le com <- c = pprCond s0 s1 "ifnmake" s2 le com
     where
       pprCond :: (Pretty a, Context a ~ ())
               => Whitespace
               -> Whitespace
               -> Doc ann
+              -> Whitespace
               -> LogicalExpr ExactPrint a
               -> Maybe (Comment ExactPrint)
               -> Doc ann
-      pprCond s0 s1 label le com =
+      pprCond s0 s1 label s2 le com =
         mconcat [ pretty () s0
                 , PP.pretty '.'
                 , pretty () s1
                 , if isFirst then mempty else "el"
                 , label
+                , pretty () s2
                 , pretty () le
                 , pprComment com
                 , PP.hardline
@@ -760,13 +778,36 @@ instance Parsable (Expr ExactPrint) where
                     , parseComp
                     ]
     where
-      parseFunc :: Text -> Parser (Value ExactPrint)
+      parseFunc :: Text -> Parser Text
       parseFunc name =
         do _   <- AL.string name
            _   <- AL.char '('
-           arg <- parse
+           arg <- parseArg
            _   <- AL.char ')'
            pure arg
+
+      parseArg :: Parser Text
+      parseArg = TL.toStrict . TLB.toLazyText <$> go 0 mempty
+        where
+          go :: Int -> Builder -> Parser Builder
+          go level argB =
+            do c <- AL.peekChar'
+               -- Makefiles aren't allowed to reach EOF here, so it's fine
+               -- to use peekChar'
+               case c of
+                 '(' ->
+                   appendAndGo (level + 1) argB
+
+                 ')' | level == 0 -> pure argB -- Argument ends here.
+                     | otherwise  -> appendAndGo (level - 1) argB
+
+                 _ ->
+                   appendAndGo level argB
+
+          appendAndGo :: Int -> Builder -> Parser Builder
+          appendAndGo level argB =
+            do c <- AL.anyChar
+               go level (argB <> TLB.singleton c)
 
       parseComp :: Parser (Expr ExactPrint)
       parseComp =
@@ -798,9 +839,9 @@ instance Pretty (Expr ExactPrint) where
         in
           pretty () eCmpLHS <> foldMap f eCmpRHS
     where
-      pprFunc :: Doc ann -> Value ExactPrint -> Doc ann
+      pprFunc :: Doc ann -> Text -> Doc ann
       pprFunc label arg =
-        label <> PP.parens (pretty () arg)
+        label <> PP.parens (PP.pretty arg)
 
 instance Parsable (ForLoop ExactPrint) where
   parse = ForLoop <$> parse <*> parse <*> parse

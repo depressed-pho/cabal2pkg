@@ -50,13 +50,14 @@ genAST pm =
                    { AST.condExt      = False
                    , AST.condBranches = AST.CondBranch cond mk :| []
                    , AST.condElse     = Nothing
-                   , AST.condEnd      = case guardVar of
-                                          AST.Value _ name ->
-                                            AST.EndIf () . Just $ AST.Comment () name
+                   , AST.condEnd      = AST.EndIf () . Just $ AST.Comment () (AST.vText guardVar)
                    }
 
         cond :: AST.Condition PlainAST
-        cond = AST.If () (AST.Not () (AST.Expr () (AST.EDefined guardVar))) Nothing
+        cond = AST.If
+               ()
+               (AST.Not () (AST.Expr () (AST.EDefined (AST.vText guardVar))))
+               Nothing
 
         mk :: Makefile PlainAST
         mk = Makefile [ guardVar .:= []

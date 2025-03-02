@@ -120,13 +120,10 @@ instance Pretty (Assignment PlainAST) where
   type Context (Assignment PlainAST) = Int
   pretty col (Assignment {..})
     = mconcat [ pretty () aVar <> pretty () aOp
-              , if null aValues
-                then mconcat
-                     [ tabs
-                     , PP.hsep $ pretty () <$> aValues
-                     , pprOptionalComment aComment
-                     ]
-                else foldMap ((tabs <>) . pretty ()) aComment
+              , mconcat [ tabs
+                        , PP.hsep $ pretty () <$> aValues
+                        , pprOptionalComment aComment
+                        ]
               , PP.hardline
               ]
     where
@@ -140,8 +137,17 @@ instance Pretty (Value PlainAST) where
   pretty _ (Value _ v) = PP.pretty (escape v)
     where
       escape :: Text -> Text
-      escape = T.replace "#"  "\\#"
-             . T.replace "\\" "\\\\"
+      escape txt
+        | T.any isUnsafe txt =
+            T.concatMap (\c -> if isUnsafe c
+                               then T.pack ['\\', c]
+                               else T.singleton c) txt
+        | otherwise = txt
+
+      isUnsafe :: Char -> Bool
+      isUnsafe '#'  = True
+      isUnsafe '\\' = True
+      isUnsafe _    = False
 
 instance IsString (Value PlainAST) where
   fromString = Value () . fromString
