@@ -185,3 +185,4 @@ test-suite cabal2pkg-tests
       , tasty             ^>= 1.5.3
       , tasty-autocollect ^>= 0.4.4
       , tasty-hunit       ^>= 0.10.2
+      , text              ^>= 2.1.1

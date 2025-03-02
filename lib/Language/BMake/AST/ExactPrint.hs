@@ -1,5 +1,6 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TypeFamilies #-}
 module Language.BMake.AST.ExactPrint
   ( -- * AST variant tag
@@ -11,15 +12,17 @@ module Language.BMake.AST.ExactPrint
 
     -- * Parsing and exact-printing
   , parseMakefile
+  , exactPrintMakefile
   ) where
 
 import Control.Applicative ((<|>))
 import Control.Monad (unless, void, when)
 import Data.Data (Data)
+import Data.Foldable1 (foldlMap1')
 import Data.String (IsString)
 import Data.Attoparsec.Text.Lazy (Parser)
 import Data.Attoparsec.Text.Lazy qualified as AL
-import Data.List.NonEmpty (NonEmpty)
+import Data.List.NonEmpty (NonEmpty((:|)))
 import Data.List.NonEmpty qualified as NE
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -30,12 +33,15 @@ import Language.BMake.AST.Extension
 import Language.BMake.AST.Parse (Parsable(..))
 import Language.BMake.AST.Pretty (Pretty(..))
 import Language.BMake.AST.Types
+import Prelude hiding (exp)
+import Prettyprinter (Doc)
 import Prettyprinter qualified as PP
+import Prettyprinter.Render.Text qualified as PT
 
 -- |The type @'Makefile' 'ExactPrint'@ is a variant of Makefile AST that is
 -- obtained by parsing an actual Makefile. It contains all the information
--- the original Makefile has, including whitespaces, and can be
--- pretty-printed back to exactly the same Makefile.
+-- the original Makefile has, including whitespaces, and is supposed to be
+-- pretty-printable back to exactly the same Makefile.
 data ExactPrint
 type instance XComment     ExactPrint   = ()
 type instance XBlank       ExactPrint   = (Whitespace, EndOfLine)
@@ -43,7 +49,7 @@ type instance XAssignment  ExactPrint   = (Whitespace, Whitespace, EndOfLine)
 type instance XValue       ExactPrint   = Whitespace
 type instance XDependency  ExactPrint   = (Whitespace, Whitespace, EndOfLine)
 type instance XShellCmd    ExactPrint   = ([Blank ExactPrint], EndOfLine)
-type instance XInclude     ExactPrint   = (Whitespace, Whitespace, Whitespace, EndOfLine)
+type instance XInclude     ExactPrint   = (Whitespace, Whitespace, Whitespace, Whitespace, EndOfLine)
 type instance XMessage     ExactPrint   = (Whitespace, Whitespace, Whitespace, EndOfLine)
 type instance XExport      ExactPrint   = (Whitespace, Whitespace, Whitespace, EndOfLine)
 type instance XExportAll   ExactPrint   = (Whitespace, Whitespace, Whitespace, EndOfLine)
@@ -62,7 +68,7 @@ type instance XExpr        ExactPrint   = (Whitespace, Whitespace)
 -- |A logical expression in parentheses.
 type instance XExpLE       ExactPrint a = (Whitespace, Whitespace, LogicalExpr ExactPrint a)
 type instance XECompare    ExactPrint   = Whitespace
-type instance XFor         ExactPrint   = (Whitespace, Whitespace, Whitespace)
+type instance XFor         ExactPrint   = (Whitespace, Whitespace, Whitespace, Whitespace)
 type instance XEndFor      ExactPrint   = (Whitespace, Whitespace, Whitespace, EndOfLine)
 type instance XBreak       ExactPrint   = (Whitespace, Whitespace, Whitespace, EndOfLine)
 
@@ -100,11 +106,14 @@ instance Parsable EndOfLine where
                     ]
 
 instance Pretty EndOfLine where
-  pretty _ EOL = PP.line
+  pretty _ EOL = PP.hardline
   pretty _ EOF = mempty
 
 instance Parsable (Makefile ExactPrint) where
   parse = Makefile <$> AL.many' parse
+
+instance Pretty (Makefile ExactPrint) where
+  pretty ctx = mconcat . (pretty ctx <$>) . blocks
 
 instance Parsable (Comment ExactPrint) where
   parse = do _ <- AL.char '#'
@@ -117,8 +126,11 @@ instance Pretty (Comment ExactPrint) where
   pretty _ (Comment _ c)
     = PP.pretty '#' <> PP.pretty c
 
-optionalComment :: Parser (Maybe (Comment ExactPrint))
-optionalComment = AL.option Nothing (Just <$> parse)
+parseComment :: Parser (Maybe (Comment ExactPrint))
+parseComment = AL.option Nothing (Just <$> parse)
+
+pprComment :: Maybe (Comment ExactPrint) -> Doc ann
+pprComment = foldMap (pretty ())
 
 instance Parsable (Block ExactPrint) where
   parse = AL.choice [ BBlank      <$> parse
@@ -127,20 +139,27 @@ instance Parsable (Block ExactPrint) where
                     , BDirective  <$> parse
                     ]
 
+instance Pretty (Block ExactPrint) where
+  pretty _ b
+    | BBlank      bl <- b = pretty () bl
+    | BAssignment as <- b = pretty () as
+    | BRule       ru <- b = pretty () ru
+    | BDirective  di <- b = pretty () di
+
 instance Parsable (Blank ExactPrint) where
   parse = do end <- AL.atEnd
              when end $
                -- Prevent an infinite loop.
                fail "Blank should not match EOL"
              ts  <- parse
-             c   <- optionalComment
+             c   <- parseComment
              e   <- parse
              pure (Blank (ts, e) c)
 
 instance Pretty (Blank ExactPrint) where
   pretty _ (Blank (ts, e) c) =
     mconcat [ pretty () ts
-            , foldMap (pretty ()) c
+            , pprComment c
             , pretty () e
             ]
 
@@ -149,7 +168,7 @@ instance Parsable (Assignment ExactPrint) where
              (v, op) <- parseVarOp
              s1 <- parse
              vs <- AL.many' parse
-             c  <- optionalComment
+             c  <- parseComment
              e  <- parse
              pure $ Assignment (s0, s1, e) v op vs c
     where
@@ -210,6 +229,18 @@ instance Parsable (Assignment ExactPrint) where
             do c <- AL.anyChar
                go level (nameB <> TLB.singleton c)
 
+instance Pretty (Assignment ExactPrint) where
+  pretty _ (Assignment {..})
+    | (s0, s1, e) <- aExt =
+        mconcat [ pretty () s0
+                , pretty () aVar
+                , pretty () aOp
+                , pretty () s1
+                , mconcat $ pretty () <$> aValues
+                , pprComment aComment
+                , pretty () e
+                ]
+
 -- Parsing a value isn't easy at all. Sigh... The bmake syntax is
 -- crazy. Normally the '#' symbol begins a comment, but it can also appear
 -- in a range modifier e.g. ${var:[#]}
@@ -217,8 +248,8 @@ instance Parsable (Value ExactPrint) where
   parse = do val <- AL.scan '\0' go
              when (T.null val) $
                fail "empty value"
-             ts  <- parse
-             pure $ Value ts val
+             s   <- parse
+             pure $ Value s val
     where
       go :: Char -- ^last character
          -> Char -- ^current character
@@ -235,10 +266,45 @@ instance Parsable (Value ExactPrint) where
       go '\\' '\\' = Just '\0' -- Escaped backslash loses its special ability.
       go _    c    = Just c
 
+instance Pretty (Value ExactPrint) where
+  pretty _ (Value s val) = pprValue val <> pretty () s
+    where
+      -- And of course pretty-printing values isn't easy, especially if one
+      -- cares about efficiency, which we do.
+      pprValue :: Text -> Doc ann
+      pprValue = PP.pretty . TLB.toLazyText . go
+
+      go :: Text -> Builder
+      go txt =
+        case T.uncons txt of
+          Nothing      -> mempty
+          Just (c, cs) -> go' (escape '\0' c) c cs
+
+      go' :: Builder -> Char -> Text -> Builder
+      go' acc c0 txt =
+        case T.uncons txt of
+          Nothing      -> acc
+          Just (c, cs) -> go' (acc <> escape c0 c) c cs
+
+      escape :: Char -> Char -> Builder
+      escape _   ' '  = "\\ "
+      escape _   '\t' = "\\\t"
+      escape _   '\n' = "\\\n"
+      escape '[' '#'  = TLB.singleton '#'
+      escape _   '#'  = "\\#"
+      escape _   '\\' = "\\\\"
+      escape _   c    = TLB.singleton c
+
 instance Parsable (Rule ExactPrint) where
   parse = do dep  <- parse
              cmds <- AL.many' parse
              pure $ Rule dep cmds
+
+instance Pretty (Rule ExactPrint) where
+  pretty _ (Rule {..}) =
+    mconcat [ pretty () rDependency
+            , mconcat $ pretty () <$> rCommands
+            ]
 
 instance Parsable (Dependency ExactPrint) where
   parse = do s0 <- parse
@@ -246,18 +312,41 @@ instance Parsable (Dependency ExactPrint) where
              ty <- parse
              s1 <- parse
              ss <- AL.many' parse
-             c  <- optionalComment
+             c  <- parseComment
              e  <- parse
              pure $ Dependency (s0, s1, e) ts ty ss c
+
+instance Pretty (Dependency ExactPrint) where
+  pretty _ (Dependency {..})
+    | (s0, s1, e) <- dExt =
+        mconcat [ pretty () s0
+                , mconcat $ pretty () <$> dTargets
+                , pretty () dType
+                , pretty () s1
+                , mconcat $ pretty () <$> dSources
+                , pprComment dComment
+                , pretty () e
+                ]
 
 instance Parsable (ShellCmd ExactPrint) where
   parse = do bs  <- AL.many' parse
              _   <- AL.char '\t'
              ms  <- AL.many' parse
              cmd <- parse
-             com <- optionalComment
+             com <- parseComment
              e   <- parse
              pure $ ShellCmd (bs, e) ms cmd com
+
+instance Pretty (ShellCmd ExactPrint) where
+  pretty _ (ShellCmd {..})
+    | (bs, e) <- sExt =
+        mconcat [ mconcat $ pretty () <$> bs
+                , PP.pretty '\t'
+                , mconcat $ pretty () <$> sModes
+                , pretty () sCommand
+                , pprComment sComment
+                , pretty () e
+                ]
 
 instance Parsable (Directive ExactPrint) where
   parse = AL.choice [ DInclude     <$> parse
@@ -270,6 +359,18 @@ instance Parsable (Directive ExactPrint) where
                     , DFor         <$> parse
                     , DBreak       <$> parse
                     ]
+
+instance Pretty (Directive ExactPrint) where
+  pretty _ d
+    | DInclude     inc <- d = pretty () inc
+    | DMessage     msg <- d = pretty () msg
+    | DExport      exp <- d = pretty () exp
+    | DExportAll   exa <- d = pretty () exa
+    | DUnexportEnv uxe <- d = pretty () uxe
+    | DUndef       und <- d = pretty () und
+    | DConditional con <- d = pretty () con
+    | DFor         for <- d = pretty () for
+    | DBreak       brk <- d = pretty () brk
 
 instance Parsable (Include ExactPrint) where
   parse = do s0   <- parse
@@ -285,9 +386,30 @@ instance Parsable (Include ExactPrint) where
                            User   -> '"'
              path <- AL.takeTill (== close)
              _    <- AL.char close
-             com  <- optionalComment
+             s3   <- parse
+             com  <- parseComment
              e    <- parse
-             pure $ Include (s0, s1, s2, e) mode loc path com
+             pure $ Include (s0, s1, s2, s3, e) mode loc path com
+
+instance Pretty (Include ExactPrint) where
+  pretty _ (Include {..})
+    | (s0, s1, s2, s3, e) <- iExt =
+        mconcat [ pretty () s0
+                , PP.pretty '.'
+                , pretty () s1
+                , pretty () iMode
+                , pretty () s2
+                , case iLoc of
+                    System -> PP.pretty '<'
+                    User   -> PP.pretty '"'
+                , PP.pretty iPath
+                , case iLoc of
+                    System -> PP.pretty '>'
+                    User   -> PP.pretty '"'
+                , pretty () s3
+                , pprComment iComment
+                , pretty () e
+                ]
 
 instance Parsable (Message ExactPrint) where
   parse = do s0  <- parse
@@ -299,9 +421,25 @@ instance Parsable (Message ExactPrint) where
                               ]
              s2  <- parse
              msg <- parse
-             com <- optionalComment
+             com <- parseComment
              e   <- parse
              pure $ Message (s0, s1, s2, e) ty msg com
+
+instance Pretty (Message ExactPrint) where
+  pretty _ (Message {..})
+    | (s0, s1, s2, e) <- msgExt =
+        mconcat [ pretty () s0
+                , PP.pretty '.'
+                , pretty () s1
+                , case msgType of
+                    Info    -> "info"
+                    Warning -> "warning"
+                    Error   -> "error"
+                , pretty () s2
+                , pretty () msgText
+                , pprComment msgComment
+                , pretty () e
+                ]
 
 instance Parsable (Export ExactPrint) where
   parse = do s0  <- parse
@@ -314,9 +452,26 @@ instance Parsable (Export ExactPrint) where
                               ]
              s2  <- parse
              vs  <- AL.many' parse
-             com <- optionalComment
+             com <- parseComment
              e   <- parse
              pure $ Export (s0, s1, s2, e) way vs com
+
+instance Pretty (Export ExactPrint) where
+  pretty _ (Export {..})
+    | (s0, s1, s2, e) <- expExt =
+        mconcat [ pretty () s0
+                , PP.pretty '.'
+                , pretty () s1
+                , case expWay of
+                    ExpEnv -> "export-env"
+                    ExpLit -> "export-lit"
+                    Exp    -> "export"
+                    Unexp  -> "unexport"
+                , pretty () s2
+                , mconcat $ pretty () <$> expVars
+                , pprComment expComment
+                , pretty () e
+                ]
 
 instance Parsable (ExportAll ExactPrint) where
   parse = do s0  <- parse
@@ -324,9 +479,20 @@ instance Parsable (ExportAll ExactPrint) where
              s1  <- parse
              _   <- AL.string "export-all"
              s2  <- parse
-             com <- optionalComment
+             com <- parseComment
              e   <- parse
              pure $ ExportAll (s0, s1, s2, e) com
+
+instance Pretty (ExportAll ExactPrint) where
+  pretty _ (ExportAll (s0, s1, s2, e) com) =
+    mconcat [ pretty () s0
+            , PP.pretty '.'
+            , pretty () s1
+            , "export-all"
+            , pretty () s2
+            , pprComment com
+            , pretty () e
+            ]
 
 instance Parsable (UnexportEnv ExactPrint) where
   parse = do s0  <- parse
@@ -334,9 +500,20 @@ instance Parsable (UnexportEnv ExactPrint) where
              s1  <- parse
              _   <- AL.string "unexport-env"
              s2  <- parse
-             com <- optionalComment
+             com <- parseComment
              e   <- parse
              pure $ UnexportEnv (s0, s1, s2, e) com
+
+instance Pretty (UnexportEnv ExactPrint) where
+  pretty _ (UnexportEnv (s0, s1, s2, e) com) =
+    mconcat [ pretty () s0
+            , PP.pretty '.'
+            , pretty () s1
+            , "unexport-env"
+            , pretty () s2
+            , pprComment com
+            , pretty () e
+            ]
 
 instance Parsable (Undef ExactPrint) where
   parse = do s0  <- parse
@@ -345,9 +522,21 @@ instance Parsable (Undef ExactPrint) where
              _   <- AL.string "undef"
              s2  <- parse
              vs  <- AL.many' parse
-             com <- optionalComment
+             com <- parseComment
              e   <- parse
              pure $ Undef (s0, s1, s2, e) vs com
+
+instance Pretty (Undef ExactPrint) where
+  pretty _ (Undef (s0, s1, s2, e) vs com) =
+    mconcat [ pretty () s0
+            , PP.pretty '.'
+            , pretty () s1
+            , "undef"
+            , pretty () s2
+            , mconcat $ pretty () <$> vs
+            , pprComment com
+            , pretty () e
+            ]
 
 instance Parsable (Conditional ExactPrint) where
   parse = do branches <- parseBranches
@@ -361,18 +550,41 @@ instance Parsable (Conditional ExactPrint) where
            bs <- AL.many' $ parseCondBranch False
            pure $ NE.fromList (b:bs)
 
+instance Pretty (Conditional ExactPrint) where
+  pretty _ (Conditional {..}) =
+    mconcat [ pprBranches condBranches
+            , foldMap (pretty ()) condElse
+            , pretty () condEnd
+            ]
+    where
+      pprBranches :: NonEmpty (CondBranch ExactPrint) -> Doc ann
+      pprBranches (br :| brs) =
+        pretty True br <> mconcat (pretty False <$> brs)
+
 instance Parsable (Else ExactPrint) where
-  parse = do s0  <- parse
-             _   <- AL.char '.'
-             s1  <- parse
-             _   <- AL.string "else"
-             s2  <- parse
-             com <- optionalComment
+  parse = do s0   <- parse
+             _    <- AL.char '.'
+             s1   <- parse
+             _    <- AL.string "else"
+             s2   <- parse
+             com  <- parseComment
              -- No need to save EndOfLine because no Makefiles can legally
              -- end with ".else".
-             _   <- AL.char '\n'
-             mk  <- parse
-             pure $ Else (s0, s1, s2) com mk
+             _    <- AL.char '\n'
+             body <- parse
+             pure $ Else (s0, s1, s2) com body
+
+instance Pretty (Else ExactPrint) where
+  pretty _ (Else (s0, s1, s2) com body) =
+    mconcat [ pretty () s0
+            , PP.pretty '.'
+            , pretty () s1
+            , "else"
+            , pretty () s2
+            , pprComment com
+            , PP.hardline
+            , pretty () body
+            ]
 
 instance Parsable (EndIf ExactPrint) where
   parse = do s0  <- parse
@@ -380,9 +592,20 @@ instance Parsable (EndIf ExactPrint) where
              s1  <- parse
              _   <- AL.string "endif"
              s2  <- parse
-             com <- optionalComment
+             com <- parseComment
              e   <- parse
              pure $ EndIf (s0, s1, s2, e) com
+
+instance Pretty (EndIf ExactPrint) where
+  pretty _ (EndIf (s0, s1, s2, e) com) =
+    mconcat [ pretty () s0
+            , PP.pretty '.'
+            , pretty () s1
+            , "endif"
+            , pretty () s2
+            , pprComment com
+            , pretty () e
+            ]
 
 -- |See 'parseCondition'.
 parseCondBranch :: Bool -> Parser (CondBranch ExactPrint)
@@ -390,8 +613,16 @@ parseCondBranch isFirst =
   do cond <- parseCondition isFirst
      -- The Parsable instance for (Makefile a) eats up everything but
      -- unnested ".elif*", ".else", or ".endif".
-     mk   <- parse
-     pure $ CondBranch cond mk
+     body <- parse
+     pure $ CondBranch cond body
+
+instance Pretty (CondBranch ExactPrint) where
+  -- |Denotes whether this is the first branch in a chain.
+  type Context (CondBranch ExactPrint) = Bool
+  pretty isFirst (CondBranch cond body) =
+    mconcat [ pretty isFirst cond
+            , pretty () body
+            ]
 
 -- |@'parseCondition' isFirst@ parses a 'Condition' where @isFirst@ denotes
 -- whether the condition is the first one in a chain (i.e. @.if@, @.ifdef@,
@@ -414,15 +645,43 @@ parseCondition isFirst =
       -- legally end with these.
       parseIf :: Whitespace -> Whitespace -> Parser (Condition ExactPrint)
       parseIf s0 s1 =
-        If (s0, s1) <$> parse <*> optionalComment
+        If (s0, s1) <$> parse <*> parseComment
 
       parseIfdef :: Whitespace -> Whitespace -> Bool -> Parser (Condition ExactPrint)
       parseIfdef s0 s1 n =
-        Ifdef (s0, s1) n <$> parse <*> optionalComment
+        Ifdef (s0, s1) n <$> parse <*> parseComment
 
       parseIfmake :: Whitespace -> Whitespace -> Bool -> Parser (Condition ExactPrint)
       parseIfmake s0 s1 n =
-        Ifmake (s0, s1) n <$> parse <*> optionalComment
+        Ifmake (s0, s1) n <$> parse <*> parseComment
+
+instance Pretty (Condition ExactPrint) where
+  -- |Denotes whether the branch it's used by is the first one in a chain.
+  type Context (Condition ExactPrint) = Bool
+  pretty isFirst c
+    | If     (s0, s1)       le com <- c = pprCond s0 s1 "if"      le com
+    | Ifdef  (s0, s1) True  le com <- c = pprCond s0 s1 "ifdef"   le com
+    | Ifdef  (s0, s1) False le com <- c = pprCond s0 s1 "ifndef"  le com
+    | Ifmake (s0, s1) True  le com <- c = pprCond s0 s1 "ifmake"  le com
+    | Ifmake (s0, s1) False le com <- c = pprCond s0 s1 "ifnmake" le com
+    where
+      pprCond :: (Pretty a, Context a ~ ())
+              => Whitespace
+              -> Whitespace
+              -> Doc ann
+              -> LogicalExpr ExactPrint a
+              -> Maybe (Comment ExactPrint)
+              -> Doc ann
+      pprCond s0 s1 label le com =
+        mconcat [ pretty () s0
+                , PP.pretty '.'
+                , pretty () s1
+                , if isFirst then mempty else "el"
+                , label
+                , pretty () le
+                , pprComment com
+                , PP.hardline
+                ]
 
 instance Parsable a => Parsable (LogicalExpr ExactPrint a) where
   -- Here we use the following grammar (in ABNF) to avoid infinite loops on
@@ -477,6 +736,20 @@ instance Parsable a => Parsable (LogicalExpr ExactPrint a) where
              pure $ Expr (s0, s1) expr
         )
 
+instance (Pretty a, Context a ~ ()) => Pretty (LogicalExpr ExactPrint a) where
+  pretty _ le
+    | Not   ()       le'  <- le = PP.pretty '!' <> pretty () le'
+    | And   ()       les  <- le = foldlMap1' (pretty ()) ((. pretty ()) . (<>) . (<> "&&")) les
+    | Or    ()       les  <- le = foldlMap1' (pretty ()) ((. pretty ()) . (<>) . (<> "||")) les
+    | Expr  (s0, s1) expr <- le = mconcat [ pretty () s0
+                                          , pretty () expr
+                                          , pretty () s1
+                                          ]
+    | ExpLE (s0, s1, le') <- le = mconcat [ pretty () s0
+                                          , PP.parens $ pretty () le'
+                                          , pretty () s1
+                                          ]
+
 instance Parsable (Expr ExactPrint) where
   parse = AL.choice [ EDefined  <$> parseFunc "defined"
                     , EMake     <$> parseFunc "make"
@@ -508,8 +781,36 @@ instance Parsable (Expr ExactPrint) where
            rhs <- parse
            pure $ ECompare s0 lhs (Just (op, rhs))
 
+instance Pretty (Expr ExactPrint) where
+  pretty _ e
+    | EDefined  arg <- e = pprFunc "defined"  arg
+    | EMake     arg <- e = pprFunc "make"     arg
+    | EEmpty    arg <- e = pprFunc "empty"    arg
+    | EExists   arg <- e = pprFunc "exists"   arg
+    | ETarget   arg <- e = pprFunc "target"   arg
+    | ECommands arg <- e = pprFunc "commands" arg
+    | ECompare {..} <- e =
+        let s0          = eCmpExt
+            f (op, rhs) = mconcat [ pretty () op
+                                  , pretty () s0
+                                  , pretty () rhs
+                                  ]
+        in
+          pretty () eCmpLHS <> foldMap f eCmpRHS
+    where
+      pprFunc :: Doc ann -> Value ExactPrint -> Doc ann
+      pprFunc label arg =
+        label <> PP.parens (pretty () arg)
+
 instance Parsable (ForLoop ExactPrint) where
   parse = ForLoop <$> parse <*> parse <*> parse
+
+instance Pretty (ForLoop ExactPrint) where
+  pretty _ (ForLoop for body end) =
+    mconcat [ pretty () for
+            , pretty () body
+            , pretty () end
+            ]
 
 instance Parsable (For ExactPrint) where
   parse = do s0   <- parse
@@ -518,10 +819,28 @@ instance Parsable (For ExactPrint) where
              _    <- AL.string "for"
              s2   <- parse
              vs   <- AL.many1' parse
+             _    <- AL.string "in"
+             s3   <- parse
              expr <- parse
-             com  <- optionalComment
+             com  <- parseComment
              _    <- AL.char '\n'
-             pure $ For (s0, s1, s2) vs expr com
+             pure $ For (s0, s1, s2, s3) vs expr com
+
+instance Pretty (For ExactPrint) where
+  pretty _ (For {..})
+    | (s0, s1, s2, s3) <- forExt =
+        mconcat [ pretty () s0
+                , PP.pretty '.'
+                , pretty () s1
+                , "for"
+                , pretty () s2
+                , mconcat $ pretty () <$> forVars
+                , "in"
+                , pretty () s3
+                , pretty () forExpr
+                , pprComment forComment
+                , PP.hardline
+                ]
 
 instance Parsable (EndFor ExactPrint) where
   parse = do s0  <- parse
@@ -529,9 +848,20 @@ instance Parsable (EndFor ExactPrint) where
              s1  <- parse
              _   <- AL.string "endfor"
              s2  <- parse
-             com <- optionalComment
+             com <- parseComment
              e   <- parse
              pure $ EndFor (s0, s1, s2, e) com
+
+instance Pretty (EndFor ExactPrint) where
+  pretty _ (EndFor (s0, s1, s2, e) com) =
+    mconcat [ pretty () s0
+            , PP.pretty '.'
+            , pretty () s1
+            , "endfor"
+            , pretty () s2
+            , pprComment com
+            , pretty () e
+            ]
 
 instance Parsable (Break ExactPrint) where
   parse = do s0  <- parse
@@ -539,9 +869,23 @@ instance Parsable (Break ExactPrint) where
              s1  <- parse
              _   <- AL.string "break"
              s2  <- parse
-             com <- optionalComment
+             com <- parseComment
              e   <- parse
              pure $ Break (s0, s1, s2, e) com
 
+instance Pretty (Break ExactPrint) where
+  pretty _ (Break (s0, s1, s2, e) com) =
+    mconcat [ pretty () s0
+            , PP.pretty '.'
+            , pretty () s1
+            , "break"
+            , pretty () s2
+            , pprComment com
+            , pretty () e
+            ]
+
 parseMakefile :: TL.Text -> Either String (Makefile ExactPrint)
 parseMakefile = AL.parseOnly (parse <* AL.endOfInput)
+
+exactPrintMakefile :: Makefile ExactPrint -> TL.Text
+exactPrintMakefile = PT.renderLazy . PP.layoutCompact . pretty ()

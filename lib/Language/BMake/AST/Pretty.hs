@@ -4,25 +4,18 @@
 {-# LANGUAGE UndecidableInstances #-}
 module Language.BMake.AST.Pretty
   ( Pretty(..)
-  , prettyPrintMakefile
   ) where
 
 import Data.Text (Text)
-import Data.Text.Lazy qualified as TL
 import Language.BMake.AST.Types
 import Prelude hiding (Ordering(..))
 import Prettyprinter (Doc)
 import Prettyprinter qualified as PP
-import Prettyprinter.Render.Text qualified as PT
 
 class Pretty a where
   type Context a
   type instance Context a = ()
   pretty  :: Context a -> a -> Doc ann
-
-instance Pretty a => Pretty [a] where
-  type Context [a] = Context a
-  pretty ctx = PP.hsep . (pretty ctx <$>)
 
 instance Pretty Text where
   pretty _ = PP.pretty
@@ -60,7 +53,3 @@ instance Pretty RelationalOp where
   pretty _ GT = PP.rangle
   pretty _ GE = ">="
 
-prettyPrintMakefile :: ( Context (Makefile x) ~ Int
-                       , Pretty (Makefile x)
-                       ) => Makefile x -> TL.Text
-prettyPrintMakefile = PT.renderLazy . PP.layoutCompact . pretty 0

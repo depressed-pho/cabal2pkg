@@ -15,6 +15,9 @@ module Language.BMake.AST.Plain
   , (.!=)
   , include
   , (?==)
+
+    -- * Pretty-printing AST
+  , prettyPrintMakefile
   ) where
 
 import Data.Data (Data)
@@ -109,7 +112,7 @@ pprOptionalComment = foldMap ((tab <>) . pretty ())
 
 instance Pretty (Blank PlainAST) where
   pretty _ (Blank _ c) =
-    foldMap (pretty ()) c <> PP.line
+    foldMap (pretty ()) c <> PP.hardline
 
 instance Pretty (Assignment PlainAST) where
   -- |The column number to align tokens.
@@ -119,11 +122,11 @@ instance Pretty (Assignment PlainAST) where
               , if null aValues
                 then mconcat
                      [ tabs
-                     , pretty () aValues
+                     , PP.hsep $ pretty () <$> aValues
                      , pprOptionalComment aComment
                      ]
                 else foldMap ((tabs <>) . pretty ()) aComment
-              , PP.line
+              , PP.hardline
               ]
     where
       tabs :: Doc ann
@@ -150,12 +153,12 @@ instance Pretty (Rule PlainAST) where
 
 instance Pretty (Dependency PlainAST) where
   pretty _ (Dependency {..})
-    = mconcat [ pretty () dTargets
+    = mconcat [ PP.hsep $ pretty () <$> dTargets
               , pretty () dType
               , PP.space
-              , pretty () dSources
+              , PP.hsep $ pretty () <$> dSources
               , pprOptionalComment dComment
-              , PP.line
+              , PP.hardline
               ]
 
 instance Pretty (ShellCmd PlainAST) where
@@ -164,23 +167,22 @@ instance Pretty (ShellCmd PlainAST) where
               , mconcat $ pretty () <$> sModes
               , pretty () sCommand
               , pprOptionalComment sComment
-              , PP.line
+              , PP.hardline
               ]
 
 instance Pretty (Directive PlainAST) where
   -- |The current depth of nested directives.
   type Context (Directive PlainAST) = Int
-  pretty depth dir =
-    case dir of
-      DInclude     inc  -> pretty depth inc
-      DMessage     msg  -> pretty depth msg
-      DExport      exp  -> pretty depth exp
-      DExportAll   exa  -> pretty depth exa
-      DUnexportEnv uxe  -> pretty depth uxe
-      DUndef       und  -> pretty depth und
-      DConditional cond -> pretty depth cond
-      DFor         for  -> pretty depth for
-      DBreak       brk  -> pretty depth brk
+  pretty depth d
+    | DInclude     inc <- d = pretty depth inc
+    | DMessage     msg <- d = pretty depth msg
+    | DExport      exp <- d = pretty depth exp
+    | DExportAll   exa <- d = pretty depth exa
+    | DUnexportEnv uxe <- d = pretty depth uxe
+    | DUndef       und <- d = pretty depth und
+    | DConditional con <- d = pretty depth con
+    | DFor         for <- d = pretty depth for
+    | DBreak       brk <- d = pretty depth brk
 
 instance Pretty (Include PlainAST) where
   -- |The current depth of nested directives.
@@ -193,7 +195,7 @@ instance Pretty (Include PlainAST) where
                 System -> PP.angles  . PP.pretty $ iPath
                 User   -> PP.dquotes . PP.pretty $ iPath
             , pprOptionalComment iComment
-            , PP.line
+            , PP.hardline
             ]
 
 instance Pretty (Message PlainAST) where
@@ -208,7 +210,7 @@ instance Pretty (Message PlainAST) where
             , PP.space
             , pretty () msgText
             , pprOptionalComment msgComment
-            , PP.line
+            , PP.hardline
             ]
 
 instance Pretty (Export PlainAST) where
@@ -222,9 +224,9 @@ instance Pretty (Export PlainAST) where
                 ExpLit -> "export-literal"
                 Unexp  -> "unexport"
             , PP.space
-            , pretty () expVars
+            , PP.hsep $ pretty () <$> expVars
             , pprOptionalComment expComment
-            , PP.line
+            , PP.hardline
             ]
 
 instance Pretty (ExportAll PlainAST) where
@@ -234,7 +236,7 @@ instance Pretty (ExportAll PlainAST) where
     mconcat [ dotSpace depth
             , "export-all"
             , pprOptionalComment com
-            , PP.line
+            , PP.hardline
             ]
 
 instance Pretty (UnexportEnv PlainAST) where
@@ -244,19 +246,19 @@ instance Pretty (UnexportEnv PlainAST) where
     mconcat [ dotSpace depth
             , "unexport-env"
             , pprOptionalComment com
-            , PP.line
+            , PP.hardline
             ]
 
 instance Pretty (Undef PlainAST) where
   -- |The current depth of nested directives.
   type Context (Undef PlainAST) = Int
-  pretty depth (Undef _ var com) =
+  pretty depth (Undef _ vars com) =
     mconcat [ dotSpace depth
             , "undef"
             , PP.space
-            , pretty () var
+            , PP.hsep $ pretty () <$> vars
             , pprOptionalComment com
-            , PP.line
+            , PP.hardline
             ]
 
 instance Pretty (Conditional PlainAST) where
@@ -274,9 +276,9 @@ instance Pretty (Conditional PlainAST) where
         | otherwise = depth
 
       pprBranches :: NonEmpty (CondBranch PlainAST) -> Doc ann
-      pprBranches (br :| brs)
-        = pretty (True, contentDepth) br <>
-          mconcat (pretty (False, contentDepth) <$> brs)
+      pprBranches (br :| brs) =
+        pretty (True, contentDepth) br <>
+        mconcat (pretty (False, contentDepth) <$> brs)
 
 instance Pretty (Else PlainAST) where
   -- |The current and the content depth of nested directives.
@@ -293,7 +295,7 @@ instance Pretty (EndIf PlainAST) where
     mconcat [ dotSpace depth
             , "endif"
             , pprOptionalComment com
-            , PP.line
+            , PP.hardline
             ]
 
 instance Pretty (CondBranch PlainAST) where
@@ -374,13 +376,13 @@ instance Pretty (For PlainAST) where
     mconcat [ dotSpace depth
             , "for"
             , PP.space
-            , pretty () forVars
+            , PP.hsep $ pretty () <$> forVars
             , PP.space
             , "in"
             , PP.space
             , pretty () forExpr
             , pprOptionalComment forComment
-            , PP.line
+            , PP.hardline
             ]
 
 instance Pretty (EndFor PlainAST) where
@@ -390,7 +392,7 @@ instance Pretty (EndFor PlainAST) where
     mconcat [ dotSpace depth
             , "endfor"
             , pprOptionalComment com
-            , PP.line
+            , PP.hardline
             ]
 
 instance Pretty (Break PlainAST) where
@@ -400,7 +402,7 @@ instance Pretty (Break PlainAST) where
     mconcat [ dotSpace depth
             , "break"
             , pprOptionalComment com
-            , PP.line
+            , PP.hardline
             ]
 
 pprAssignments :: Foldable t => t (Assignment PlainAST) -> Doc ann
@@ -444,13 +446,13 @@ instance Pretty FoldedAssignment where
     = mconcat [ pretty () aVar
               , pretty () aOp
               , if null aValues && isNothing aComment
-                then PP.line
+                then PP.hardline
                 else mconcat [ tab
                              , PP.backslash
-                             , PP.line
+                             , PP.hardline
                              , go aValues
                              , pprOptionalComment aComment
-                             , PP.line
+                             , PP.hardline
                              ]
               ]
     where
@@ -461,7 +463,7 @@ instance Pretty FoldedAssignment where
                           , pretty () x
                           , tab
                           , PP.backslash
-                          , PP.line
+                          , PP.hardline
                           , go xs
                           ]
 
@@ -511,3 +513,6 @@ include path =
 infix 1 ?==
 (?==) :: Text -> Text -> Expr PlainAST
 a ?== b = ECompare () (Value () a) (Just (EQ, Value () b))
+
+prettyPrintMakefile :: Makefile PlainAST -> TL.Text
+prettyPrintMakefile = PT.renderLazy . PP.layoutCompact . pretty 0

@@ -5,14 +5,16 @@ module Language.BMake.AST
   , PlainAST
   , ExactPrint
 
-    -- * Parsing and pretty-printing
+    -- * Parsing and exact-printing Makefiles
   , parseMakefile
+  , exactPrintMakefile
+
+    -- * Pretty-printing Makefiles
   , prettyPrintMakefile
   ) where
 
-import Language.BMake.AST.ExactPrint (ExactPrint, parseMakefile)
+import Language.BMake.AST.ExactPrint (ExactPrint, parseMakefile, exactPrintMakefile)
 import Language.BMake.AST.Extension
-import Language.BMake.AST.Plain (PlainAST)
-import Language.BMake.AST.Pretty (prettyPrintMakefile)
+import Language.BMake.AST.Plain (PlainAST, prettyPrintMakefile)
 import Language.BMake.AST.Types
 import Prelude hiding (Ordering(..))
