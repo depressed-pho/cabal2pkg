@@ -21,7 +21,7 @@ import Data.Text qualified as T
 import Distribution.Types.PackageId (PackageIdentifier(..))
 import Cabal2Pkg.Pretty (prettyAnsi)
 import Cabal2Pkg.RawMeta (RawMeta(rmGPD), readRawMeta)
-import Cabal2Pkg.Site (PackageURI, renderPackageURI)
+import Cabal2Pkg.Site (PackageURI, isFromLocalFS, renderPackageURI)
 import Data.Generics.Aliases (GenericQ, mkQ, extQ)
 import Data.Generics.Schemes (everything)
 import GHC.Stack (HasCallStack)
@@ -52,10 +52,12 @@ option = PP.annotate (PP.colorDull PP.Green)
 fetchMeta :: HasCallStack => PackageURI -> CLI PackageMeta
 fetchMeta uri =
   do uri' <- renderPackageURI uri
-     info $ PP.hsep [ "Fetching"
-                    , prettyAnsi uri'
-                    , "and analysing its package description..."
-                    ]
+     if isFromLocalFS uri
+       then info $ "Analysing" <+> prettyAnsi uri' <> "..."
+       else info $ PP.hsep [ "Fetching"
+                           , prettyAnsi uri'
+                           , "and analysing its package description..."
+                           ]
 
      rawMeta <- readRawMeta uri
      debug $ "Found a package description:\n" <> PP.pretty (ppShow . rmGPD $ rawMeta)

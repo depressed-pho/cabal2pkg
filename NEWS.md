@@ -16,15 +16,17 @@
 * Fixed an issue where `cabal2pkg update` aborts with an error for some
   packages on Hackage. It failed when the package to be updated had
   versions marked as `unpreferred` in its version list.
-* `cabal2pkg update` now removes `HASKELL_UNRESTRICT_DEPENDENCIES` before
-  merging local changes. The variable is now completely overwritten rather
-  than being patched during updates. This is because its value is not
-  determined solely by the package itself but also by the surrounding
-  environment (i.e. the versions of packages it dependson, including the
-  ones that come along with GHC), and the environment might have changed
-  since when the last time the package was updated. Attempting to merge
-  changes to them thus tended to create merge conflicts that didn't really
-  make sense.
+* `cabal2pkg update` now temporarily removes
+  `HASKELL_UNRESTRICT_DEPENDENCIES` before merging local changes. The
+  variable is now completely overwritten rather than being patched during
+  updates. This is because its value is not determined solely by the
+  package itself but also by the surrounding environment (i.e. the versions
+  of packages it dependson, including the ones that come along with GHC),
+  and the environment might have changed since when the last time the
+  package was updated. Attempting to merge changes to them thus tended to
+  create merge conflicts that didn't really make sense.
+* `cabal2pkg update` now tries to update `HASKELL_UNRESTRICT_DEPENDENCIES`
+  even when the package is already the latest one.
 
 ## 0.1.1 -- 2025-01-11
 

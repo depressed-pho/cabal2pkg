@@ -47,10 +47,11 @@ import GHC.Stack (HasCallStack)
 import Language.BMake.AST
   (ExactPrint, Makefile, exactPrintMakefile, parseMakefile)
 import Language.BMake.AST qualified as AST
-import Prelude hiding (readFile, writeFile)
+import Prelude hiding (mod, readFile, writeFile)
 import Prettyprinter ((<+>), Doc)
 import Prettyprinter qualified as PP
 import Prettyprinter.Render.Terminal (AnsiStyle)
+import Prettyprinter.Render.Terminal qualified as PP
 import System.Directory.PosixPath (removePathForcibly, renameFile)
 import System.File.PosixPath.Alt (readFile, writeFile, writeFreshFile)
 import System.IO.Error (isDoesNotExistError)
@@ -107,7 +108,7 @@ run opts@(UpdateOptions {..}) =
                 in
                   if latest > pkgVersion pkgId
                   then cont (Hackage $ HackageDist name (Just latest)) -- Yes it is.
-                  else alreadyLatest path pkgId
+                  else alreadyLatest path pkgId >> maybeRegenFiles opts pkg
               Just ver ->
                 -- The user requested a specific version. Does it exist?
                 -- Is it any newer then the current one? Is it preferred?
@@ -115,21 +116,21 @@ run opts@(UpdateOptions {..}) =
                   Just Hackage.Normal ->
                     case ver `compare` pkgVersion pkgId of
                       GT             -> cont pkgURI -- Yes it is.
-                      EQ             -> alreadyExact path ver
+                      EQ             -> alreadyExact path ver >> maybeRegenFiles opts pkg
                       -- It's not but the user explicitly asked to do it.
                       LT | optForce  -> downgradeForced path ver pkgId >> cont pkgURI
                          | otherwise -> downgradeRefused path ver pkgId
                   Just Hackage.Unpreferred ->
                     case ver `compare` pkgVersion pkgId of
                       GT             -> unprUpdateRequested path ver >> cont pkgURI
-                      EQ             -> alreadyExactUnpr path ver
+                      EQ             -> alreadyExactUnpr path ver >> maybeRegenFiles opts pkg
                       LT | optForce  -> unprDowngradeForced path ver pkgId >> cont pkgURI
                          | otherwise -> unprDowngradeRefused path ver pkgId
                   Just Hackage.Deprecated ->
                     case ver `compare` pkgVersion pkgId of
                       GT | optForce  -> deprUpdateForced path ver >> cont pkgURI
                       GT | otherwise -> deprUpdateRefused path ver
-                      EQ             -> alreadyExactDepr path ver
+                      EQ             -> alreadyExactDepr path ver >> maybeRegenFiles opts pkg
                       LT | optForce  -> deprDowngradeForced path ver pkgId >> cont pkgURI
                          | otherwise -> deprDowngradeRefused path ver pkgId
                   Nothing ->
@@ -380,7 +381,7 @@ examineNewMeta opts@(UpdateOptions {..}) pkg pkgId pkgURI =
          in
            case ver `compare` pkgVersion pkgId of
              GT             -> cont -- It's newer.
-             EQ             -> alreadyLatest path pkgId
+             EQ             -> alreadyLatest path pkgId >> maybeRegenFiles opts pkg
              -- It's older but the user explicitly asked to do it.
              LT | optForce  -> downgradeForced path ver pkgId >> cont
                 | otherwise -> downgradeRefused path ver pkgId
@@ -402,14 +403,7 @@ examineOldMeta :: HasCallStack
                -> PackageMeta
                -> CLI ()
 examineOldMeta opts pkg oldFlags newMeta =
-  do path      <- pkgPath
-     oldPkgURI <- let err = fatal $ PP.hsep [ prettyAnsi path
-                                            , "has no MASTER_SITES."
-                                            , command'
-                                            , "cannot figure out how to update this package."
-                                            ]
-                  in
-                    maybeM err pure $ reconstructPackageURI pkg
+  do oldPkgURI <- uriFromPkg pkg
      mtr       <- SrcDb.maintainer pkg
      owr       <- SrcDb.owner      pkg
      -- As this is old metadata, no package flags on the command line
@@ -421,7 +415,7 @@ examineOldMeta opts pkg oldFlags newMeta =
                   $ if isFromHackage oldPkgURI then
                       fetchMeta oldPkgURI
                     else
-                      fetchDistFile oldPkgURI
+                      fetchDistFile pkg
      -- Renaming packages is currently not supported. It will probably
      -- never be.
      when (distBase oldMeta /= distBase newMeta) . fatal $
@@ -434,21 +428,33 @@ examineOldMeta opts pkg oldFlags newMeta =
                , "cannot do that."
                ]
      applyChanges opts pkg oldMeta newMeta
-  where
-    fetchDistFile :: PackageURI -> CLI PackageMeta
-    fetchDistFile pkgURI =
-      do runMake ["fetch"]
-         dir    <- distDir
-         subDir <- SrcDb.distSubDir pkg
-         name   <- SrcDb.distName pkg
-         sufx   <- SrcDb.extractSufx pkg
-         path   <- OP.decodeUtf
-                   $ maybe dir (dir </>) subDir </> name <> sufx
-         meta   <- fetchMeta (File path)
-         -- Correct the 'origin' because it might not be accurate.
-         pure $ meta { origin = pkgURI }
 
--- |This is a continuation of 'examineOldMeta'. Perform a 3-way merge based
+uriFromPkg :: SrcDb.Package CLI -> CLI PackageURI
+uriFromPkg pkg =
+  do path <- pkgPath
+     let err = fatal $ PP.hsep [ prettyAnsi path
+                               , "has no MASTER_SITES."
+                               , command'
+                               , "cannot figure out how to update this package."
+                               ]
+     maybeM err pure $ reconstructPackageURI pkg
+
+fetchDistFile :: SrcDb.Package CLI -> CLI PackageMeta
+fetchDistFile pkg =
+  do runMake ["fetch"]
+     dir    <- distDir
+     subDir <- SrcDb.distSubDir pkg
+     name   <- SrcDb.distName pkg
+     sufx   <- SrcDb.extractSufx pkg
+     path   <- OP.decodeUtf
+               $ maybe dir (dir </>) subDir </> name <> sufx
+     meta   <- fetchMeta (File path)
+     -- Correct the 'origin' because it's inaccurate due to the use of
+     -- (File path) above.
+     pkgURI <- uriFromPkg pkg
+     pure $ meta { origin = pkgURI }
+
+-- This is a continuation of examineOldMeta. Perform a 3-way merge based
 -- on the current set of files and the old and new package metadata.
 applyChanges :: HasCallStack
              => UpdateOptions
@@ -469,21 +475,7 @@ applyChanges (UpdateOptions {..}) pkg oldMeta newMeta =
                              , T.pack . prettyShow . distVersion $ newMeta
                              , " (new)"
                              ]
-     let ppMakefile :: (Makefile ExactPrint -> Makefile ExactPrint)
-                    -> PosixPath
-                    -> TL.Text
-                    -> CLI TL.Text
-         ppMakefile ppAST name cur =
-           case parseMakefile cur of
-             Left msg ->
-               fatal $ PP.hsep [ "Failed to parse"
-                               , prettyAnsi name <> PP.colon
-                               , PP.pretty msg
-                               ]
-             Right ast ->
-               pure . exactPrintMakefile . ppAST $ ast
-
-         update :: PosixPath
+     let update :: PosixPath
                 -> (PackageMeta -> TL.Text)
                 -> (PosixPath -> TL.Text -> CLI TL.Text)
                 -> CLI ()
@@ -493,9 +485,10 @@ applyChanges (UpdateOptions {..}) pkg oldMeta newMeta =
               -- generated from oldMeta, which wastes CPU cycles but
               -- there's no good way to avoid it.
               base <- preprocess name (gen oldMeta)
-              cur  <- preprocess name =<< readFile' name
+              cur  <- readFile' name
+              cur' <- preprocess name cur
               let merged = merge optMarkerStyle
-                                 (labelCur , cur )
+                                 (labelCur , cur')
                                  (labelBase, base)
                                  (labelNew , new )
               if merged == cur
@@ -539,7 +532,7 @@ applyChanges (UpdateOptions {..}) pkg oldMeta newMeta =
          update bl3 genBuildlink3 (ppMakefile (stripBl3Rev pBase))
          `catch` \(e :: IOError) ->
                    if isDoesNotExistError e then
-                     updateFile' bl3 (genBuildlink3 newMeta)
+                     writeFile' bl3 (genBuildlink3 newMeta)
                    else
                      throw e
 
@@ -584,6 +577,142 @@ applyChanges (UpdateOptions {..}) pkg oldMeta newMeta =
                               ]
        else do info "Updating distinfo..."
                runMake ["distinfo"]
+               info $ PP.annotate (PP.colorDull PP.Yellow <> PP.bold)
+                      "Successfully updated the package."
+
+-- This is a continuation of applyChanges, which is used only when DISTFILE
+-- is the same. Metadata can still have differences because the desired set
+-- of package flags can differ.
+maybeRegenFiles :: HasCallStack
+                => UpdateOptions
+                -> SrcDb.Package CLI
+                -> CLI ()
+maybeRegenFiles (UpdateOptions {..}) pkg =
+  do info "Checking if files still needs updating..."
+
+     -- Unlike examineOldMeta we always run "make fetch" and try to locate
+     -- a tarball, because the distfile is guaranteed to stay the same.
+     oldFlags <- packageFlags pkg
+     oldMeta  <- fetchMeta' (const oldFlags)
+     newMeta  <- fetchMeta' (<>    oldFlags)
+     assert ( distBase    oldMeta == distBase    newMeta &&
+              distVersion oldMeta == distVersion newMeta
+            ) (pure ())
+
+     distName <- (T.pack <$>) . OP.decodeUtf =<< SrcDb.distName pkg
+     let labelCur  = distName <> " (current)"
+         labelBase = distName <> " (merge base)"
+         labelNew  = distName <> " (updated)"
+
+     let update :: PosixPath
+                -> (PackageMeta -> TL.Text)
+                -> (PosixPath -> TL.Text -> CLI TL.Text)
+                -> CLI Bool -- ^True if there are changes.
+         update name gen preprocess =
+           do let new = gen newMeta
+              base <- preprocess name (gen oldMeta)
+              cur  <- readFile' name
+              cur' <- preprocess name cur
+              let merged = merge optMarkerStyle
+                           (labelCur , cur')
+                           (labelBase, base)
+                           (labelNew , new )
+              if merged == cur
+                then do info $ prettyAnsi name <+> "needs no changes."
+                        pure False
+                else do name' <- OP.decodeUtf name
+                        debug $ mconcat [ "Merged" <+> PP.pretty name'
+                                        , ":\n"
+                                        , PP.pretty (TL.strip merged)
+                                        ]
+                        -- Rename the existing file before writing the
+                        -- merged one. We will delete old files but we do
+                        -- it at the very end.
+                        renameFile' name (name <> backupSuffix)
+                        updateFile' name merged
+                        -- Warn if it has conflicts.
+                        when (hasMarkers merged) . warn $
+                          PP.hsep [ prettyAnsi name
+                                  , "has merge conflicts."
+                                  , "Please don't forget to resolve them."
+                                  ]
+                        pure True
+
+     width    <- fillColumn
+     updates  <- sequence
+                 [ update [pstr|DESCR|]    (genDESCR width) (const (pure . id))
+                 , update [pstr|Makefile|] genMakefile (ppMakefile (stripUnrestrict . stripMakefileRev))
+
+                 , do pBase <- (T.pack <$>) . OP.decodeUtf =<< pkgBase
+                      let bl3 = [pstr|buildlink3.mk|]
+                      case shouldHaveBuildlink3 newMeta of
+                        Just False ->
+                          deleteFile' True bl3 *> pure True
+
+                        Just True ->
+                          update bl3 genBuildlink3 (ppMakefile (stripBl3Rev pBase))
+                          `catch` \(e :: IOError) ->
+                                    if isDoesNotExistError e then
+                                      writeFile' bl3 (genBuildlink3 newMeta) *> pure True
+                                    else
+                                      throw e
+
+                        Nothing ->
+                          update bl3 genBuildlink3 (ppMakefile (stripBl3Rev pBase))
+                          `catch` \(e :: IOError) ->
+                                    if isDoesNotExistError e then
+                                      pure False
+                                    else
+                                      throw e
+                 ]
+     wantCMsg <- wantCommitMsg
+     when (wantCMsg && or updates) $
+       do path <- OP.decodeUtf =<< pkgPath
+          let cMsg = TL.unlines
+                     [ mconcat
+                       [ TL.pack path
+                       , ": accommodate files to the current environment"
+                       ]
+                     ]
+          debug $ "Generated COMMIT_MSG:\n" <> PP.pretty (TL.strip cMsg)
+          writeFile' [pstr|COMMIT_MSG|] cMsg
+
+     if or updates
+       then info $ PP.annotate (PP.colorDull PP.Yellow <> PP.bold)
+                   "Some files have been changed. Please commit them."
+       else info $ PP.annotate (PP.colorDull PP.Green)
+                   "No files have been changed."
+
+     -- There can be no changes to PLIST or distfiles ever. Now that we
+     -- updated all the files, we can delete backup now.
+     mapM_ deleteBackup [ [pstr|DESCR|]
+                        , [pstr|Makefile|]
+                        , [pstr|buildlink3.mk|]
+                        ]
+    where
+      fetchMeta' :: (FlagMap -> FlagMap) -> CLI PackageMeta
+      fetchMeta' mod =
+        do mtr <- SrcDb.maintainer pkg
+           owr <- SrcDb.owner      pkg
+           withPkgFlagsHidden
+             . withPkgFlagsModified mod
+             . withMaintainer mtr
+             . withOwner owr
+             $ fetchDistFile pkg
+
+ppMakefile :: (Makefile ExactPrint -> Makefile ExactPrint)
+           -> PosixPath
+           -> TL.Text
+           -> CLI TL.Text
+ppMakefile ppAST name cur =
+  case parseMakefile cur of
+    Left msg ->
+      fatal $ PP.hsep [ "Failed to parse"
+                      , prettyAnsi name <> PP.colon
+                      , PP.pretty msg
+                      ]
+    Right ast ->
+      pure . exactPrintMakefile . ppAST $ ast
 
 backupSuffix :: PosixString
 backupSuffix = [pstr|.cabal2pkg.sav|]
