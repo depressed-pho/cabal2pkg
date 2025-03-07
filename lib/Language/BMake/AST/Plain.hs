@@ -120,10 +120,12 @@ instance Pretty (Assignment PlainAST) where
   type Context (Assignment PlainAST) = Int
   pretty col (Assignment {..})
     = mconcat [ pretty () aVar <> pretty () aOp
-              , mconcat [ tabs
-                        , PP.hsep $ pretty () <$> aValues
-                        , pprOptionalComment aComment
-                        ]
+              , if null aValues
+                then foldMap ((tabs <>) . pretty ()) aComment
+                else mconcat [ tabs
+                             , PP.hsep $ pretty () <$> aValues
+                             , pprOptionalComment aComment
+                             ]
               , PP.hardline
               ]
     where
