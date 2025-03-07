@@ -120,7 +120,11 @@ genAST pm
                         [ "COMMENT" .= mempty # "TODO: Short description of the package" ]
                     | otherwise ->
                         [ "COMMENT" .= pure (comment pm) ]
-             <> [ "LICENSE" .= pure (license pm)
+             <> [ case T.uncons (license pm) of
+                    Just ('#', l') ->
+                      "LICENSE" .= [] # T.strip l'
+                    _ ->
+                      "LICENSE" .= pure (license pm)
                 , blank
                 ]
 
