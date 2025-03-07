@@ -28,6 +28,7 @@
 * `cabal2pkg update` now tries to update `HASKELL_UNRESTRICT_DEPENDENCIES`
   even when the package is already the latest one.
 * Newlines in `COMMENT` are now replaced with spaces.
+* Fixed a bug where `PKGNAME` could be incorrectly generated sometimes.
 
 ## 0.1.1 -- 2025-01-11
 

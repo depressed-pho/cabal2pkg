@@ -19,6 +19,7 @@ import Cabal2Pkg.Extractor.Dependency.Version (cmpRange)
 import Cabal2Pkg.Site (PackageURI(..), isFromHackage)
 import Cabal2Pkg.Site.GitHub (genGitHubMasterSites)
 import Cabal2Pkg.Site.GitLab (genGitLabMasterSites)
+import Data.CaseInsensitive qualified as CI
 import Data.Data (gmapQl)
 import Data.Foldable (toList)
 import Data.Generics.Aliases (GenericQ, mkQ, extQ)
@@ -83,14 +84,17 @@ genAST pm
              -- point would cause a major breakage. So we need to
              -- explicitly define it here whenever pkgBase isn't equal to
              -- hs-{distBase}.
-             <> (if pkgBase pm == "hs-" <> distBase' then
-                   mempty
-                 else
-                   [ "PKGNAME" .= pure (if pkgBase pm == distBase' then
-                                          "${DISTNAME}"
-                                        else
-                                          "${DISTNAME:tl}")
-                   ])
+             <> ( if pkgBase pm == "hs-" <> distBase' then
+                    mempty
+                  else
+                    let pkgName
+                          | pkgBase pm == CI.foldCase distBase' =
+                              "${DISTNAME:tl}"
+                          | otherwise =
+                              "hs-${DISTNAME:tl}"
+                    in
+                      [ "PKGNAME" .= pure pkgName ]
+                )
              <> case categories pm of
                   []   -> [ "CATEGORIES" .= mempty # "TODO" ]
                   cats -> [ "CATEGORIES" .= cats ]
