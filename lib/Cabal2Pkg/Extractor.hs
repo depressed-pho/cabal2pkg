@@ -99,6 +99,7 @@ extractComment =
   dropPeriod
   . capitaliseHead
   . dropArticle
+  . T.map newlineToSpace
   . T.pack . ST.fromShortText . PD.synopsis
   where
     dropArticle :: Text -> Text
@@ -119,6 +120,10 @@ extractComment =
       case T.unsnoc comm of
         Just (comm', '.') -> comm'
         _                 -> comm
+
+    newlineToSpace :: Char -> Char
+    newlineToSpace '\n' = ' '
+    newlineToSpace c    = c
 
 extractDescription :: PackageDescription -> Text
 extractDescription pd =

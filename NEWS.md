@@ -27,6 +27,7 @@
   create merge conflicts that didn't really make sense.
 * `cabal2pkg update` now tries to update `HASKELL_UNRESTRICT_DEPENDENCIES`
   even when the package is already the latest one.
+* Newlines in `COMMENT` are now replaced with spaces.
 
 ## 0.1.1 -- 2025-01-11
 
