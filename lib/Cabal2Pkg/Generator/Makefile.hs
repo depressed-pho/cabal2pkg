@@ -440,7 +440,7 @@ genLibDepAST pm cm libDep =
           -- optparse-applicative. Most of the time, if not always, their
           -- command-line interface is built on top of optparse-applicative
           -- and thus support generating shell completion scripts.
-          let exeDecl = if cm ^. cName == (T.pack . prettyShow . distBase) pm then
+          let exeDecl = if cm ^. cName == pkgBase pm then
                           mempty
                         else
                           Makefile [ "OPTPARSE_APPLICATIVE_EXECUTABLES" .+= [cm ^. cName] ]
