@@ -2,20 +2,23 @@
 
 ## 0.1.2 -- not released yet
 
+Compatibility changes:
+
 * Fixed build with GHC 9.10. `cabal2pkg` no longer supports GHC 9.8.
+
+New features:
+
 * Added a global option `--fill-column=COLUMN` for specifying page
   width. Currently only used for generating `DESCR` files. Previously it
   was fixed to 80, but now it's defaulted to 76.
-* Fixed the `COMMIT_MSG` saying "no release notes have been provided"
-  having no newlines at the end of file.
+
+Behaviour changes:
+
 * `cabal2pkg` no longer hard-codes the path to GHC found at compile
   time. It now instead searches in PATH at run-time. This is because
   `cabal2pkg` is intended to be used while the pkgsrc tree is in an
   inconsistent state where it isn't always possible to rebuild `cabal2pkg`
   immediately after updating GHC.
-* Fixed an issue where `cabal2pkg update` aborts with an error for some
-  packages on Hackage. It failed when the package to be updated had
-  versions marked as `unpreferred` in its version list.
 * `cabal2pkg update` now temporarily removes
   `HASKELL_UNRESTRICT_DEPENDENCIES` before merging local changes. The
   variable is now completely overwritten rather than being patched during
@@ -28,6 +31,14 @@
 * `cabal2pkg update` now tries to update `HASKELL_UNRESTRICT_DEPENDENCIES`
   even when the package is already the latest one.
 * Newlines in `COMMENT` are now replaced with spaces.
+
+Bug fixes:
+
+* Fixed the `COMMIT_MSG` saying "no release notes have been provided"
+  having no newlines at the end of file.
+* Fixed an issue where `cabal2pkg update` aborts with an error for some
+  packages on Hackage. It failed when the package to be updated had
+  versions marked as `unpreferred` in its version list.
 * Fixed a bug where `PKGNAME` could be incorrectly generated sometimes.
 * Fixed a bug where `OPTPARSE_APPLICATIVE_EXECUTABLES` in some cases didn't
   get defined when it should.
