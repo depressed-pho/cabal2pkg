@@ -173,6 +173,7 @@ test-suite cabal2pkg-tests
     main-is:        test.hs
 
     other-modules:
+        Test.Cabal2Pkg.Generator.Description
         Test.Language.BMake.AST.Parse
         Test.Language.BMake.AST.Pretty
 
@@ -180,7 +181,8 @@ test-suite cabal2pkg-tests
         tasty-autocollect:tasty-autocollect ^>= 0.4.4
 
     build-depends:
-        base               == 4.*
+        Cabal-syntax      ^>= 3.12
+      , base               == 4.*
       , cabal2pkg
       , file-embed        ^>= 0.0.16
       , tasty             ^>= 1.5.3

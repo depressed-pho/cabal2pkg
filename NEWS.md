@@ -29,8 +29,10 @@
   even when the package is already the latest one.
 * Newlines in `COMMENT` are now replaced with spaces.
 * Fixed a bug where `PKGNAME` could be incorrectly generated sometimes.
-* FIxed a bug where `OPTPARSE_APPLICATIVE_EXECUTABLES` in some cases didn't
+* Fixed a bug where `OPTPARSE_APPLICATIVE_EXECUTABLES` in some cases didn't
   get defined when it should.
+* Fixed an issue where ordered, unordered, or definition lists in `DESCR`
+  files were sometimes rendered incorrectly.
 
 ## 0.1.1 -- 2025-01-11
 

@@ -22,8 +22,8 @@ import Prettyprinter ((<+>), Doc, LayoutOptions(..), PageWidth(..))
 import Prettyprinter qualified as PP
 import Prettyprinter.Render.Text (renderLazy)
 
--- import Debug.Trace (traceWith)
--- import Text.Show.Pretty (ppShow)
+--import Debug.Trace (traceWith)
+--import Text.Show.Pretty (ppShow)
 
 
 genDESCR :: HasCallStack => Natural -> PackageMeta -> TL.Text
@@ -130,22 +130,22 @@ plainTextMarkup fromMod fromId =
     unordList = (<> PP.line) . (<> PP.line) . PP.vsep . (go <$>)
       where
         go :: [Doc ann] -> Doc ann
-        go = (PP.pretty '*' <+>) . PP.nest 2 . mconcat
+        go = (PP.pretty '*' <+>) . PP.hang 0 . PP.hsep
 
     ordList :: [(Int, [Doc ann])] -> Doc ann
     ordList = (<> PP.line) . (<> PP.line) . PP.vsep . (go <$>)
       where
         go :: (Int, [Doc ann]) -> Doc ann
         go (idx, item) =
-          PP.pretty idx <> PP.dot <+> PP.nest 2 (mconcat item <> PP.colon)
+          PP.pretty idx <> PP.dot <+> PP.hang 0 (PP.hsep item)
 
     defList :: [([Doc ann], [Doc ann])] -> Doc ann
     defList = (<> PP.line) . (<> PP.line) . PP.vsep . (go <$>)
       where
         go :: ([Doc ann], [Doc ann]) -> Doc ann
         go (term, desc) =
-          PP.vsep [ PP.pretty '*' <+> PP.nest 2 (mconcat term <> PP.colon)
-                  , PP.indent 4 (mconcat desc)
+          PP.vsep [ PP.pretty '*' <+> PP.hang 0 (PP.hsep term <> PP.colon)
+                  , PP.indent 4 (PP.hsep desc)
                   ]
 
     examples :: [Example] -> Doc ann
