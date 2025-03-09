@@ -170,14 +170,14 @@ CONFIGURE_ARGS+=	-f +lua
 \&.include "../../mk/bsd.pkg.mk"
 .Ed
 .It Fl \-fill-column Ns = Ns Ar COLUMN
-Column beyond which line-wrapping should happen. Only used for
+Column beyond which line-wrapping should happen.  Only used for
 .Pa DESCR
-files at the time of writing this manual page. Note that this option is
+files at the time of writing this manual page.  Note that this option is
 meant to be used only for debugging.
 .It Fl \-ghc Ns = Ns Ar FILE
 The path to GHC executable.  This is mostly used for locating the
-Haskell package directory.  Its default value is determined at the
-build time.
+Haskell package directory.  When it is omitted it will be searched from
+.Ev PATH .
 .It Fl \-make Ns = Ns Ar FILE
 The path to BSD
 .Xr make 1
