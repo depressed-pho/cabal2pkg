@@ -10,8 +10,8 @@ module Cabal2Pkg.Extractor.Component
 import Cabal2Pkg.CmdLine (CLI, FlagMap)
 import Cabal2Pkg.CmdLine qualified as CLI
 import Cabal2Pkg.Extractor.Conditional
-  ( Environment(..), CondBlock, extractCondBlock )
-import Cabal2Pkg.Extractor.Dependency (DepSet, extractDeps)
+  ( Environment(..), CondBlock, always, extractCondBlock )
+import Cabal2Pkg.Extractor.Dependency (DepSet, isBuildable, extractDeps)
 import Control.Monad (when, unless)
 import Data.Data (Data)
 import Data.Foldable (toList)
@@ -33,7 +33,7 @@ import Distribution.Types.LibraryName qualified as C
 import Distribution.Types.PackageDescription qualified as C
 import Distribution.Types.PackageId qualified as C
 import Distribution.Types.UnqualComponentName qualified as C
-import Lens.Micro.Platform ((^.), makeLenses, to)
+import Lens.Micro.Platform ((^.), makeLenses)
 import Prettyprinter ((<+>), Doc)
 import Prettyprinter qualified as PP
 import UnliftIO.Async (Conc)
@@ -62,18 +62,20 @@ extractComponents gpd
        subLibs <- traverse (extractLib    env . snd) (GPD.condSubLibraries gpd)
        frnLibs <- traverse (extractFrnLib env . snd) (GPD.condForeignLibs  gpd)
        execs   <- traverse (extractExe    env . snd) (GPD.condExecutables  gpd)
-       pure . aggregate $
+       pure . garbageCollect . mconcat $
          [ maybeToList lib
          , subLibs
          , frnLibs
          , execs
          ]
   where
-    aggregate :: [[ComponentMeta]] -> [ComponentMeta]
-    aggregate = filter (not . isEmpty) . mconcat
-
-    isEmpty :: ComponentMeta -> Bool
-    isEmpty c = c ^. cDeps . to (== mempty)
+    garbageCollect :: [ComponentMeta] -> [ComponentMeta]
+    garbageCollect = filter p
+      where
+        -- Omit components that are never buildable. Conditionally
+        -- buildable ones should be retained.
+        p :: ComponentMeta -> Bool
+        p = (^. cDeps . always . isBuildable)
 
     extractEnv :: CLI Environment
     extractEnv

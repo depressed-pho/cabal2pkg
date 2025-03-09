@@ -52,6 +52,9 @@ Bug fixes:
 * Fixed a bug where `cabal2pkg update` could show a bogus message saying
   `Deleted buildlink3.mk` when there was no `buildlink3.mk` in the first
   place.
+* Fixed an issue where package components (e.g. `lib:*`) with no visible
+  dependencies could survive garbage collection in certain cases, leaving
+  empty sections in Makefiles.
 
 ## 0.1.1 -- 2025-01-11
 

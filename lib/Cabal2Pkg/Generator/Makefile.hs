@@ -27,6 +27,7 @@ import Data.Generics.Schemes (everything)
 import Data.Map qualified as M
 import Data.Set (Set)
 import Data.Set qualified as S
+import Data.Set.Ordered (OSet)
 import Data.Set.Ordered qualified as OS
 import Data.List.NonEmpty (NonEmpty((:|)))
 import Data.List.NonEmpty qualified as NE
@@ -291,9 +292,44 @@ genMasterSites pm =
 -- > .include "../../devel/hs-baz/buildlink3.mk"
 genComponentsAST :: HasCallStack => PackageMeta -> [ComponentMeta] -> Makefile PlainAST
 genComponentsAST pm comps
-  = case comps of
-      [cm] -> genSingleComponentAST pm cm
-      _    -> mconcat $ genMultiComponentAST pm <$> comps
+  = case gcComponents comps of
+      [cm]   -> genSingleComponentAST pm cm
+      comps' -> mconcat $ genMultiComponentAST pm <$> comps'
+
+-- |Omit components that have no visible dependencies, i.e. pkgsrc
+-- dependencies, not compiler-bundled ones.
+gcComponents :: HasCallStack => [ComponentMeta] -> [ComponentMeta]
+gcComponents = filter p
+  where
+    p :: ComponentMeta -> Bool
+    p = anywhere nonNull
+
+    nonNull :: GenericQ Bool
+    nonNull = mkQ False (not . nullDS)
+
+    nullDS :: DepSet -> Bool
+    nullDS ds =
+      and @[] [ ds ^. exeDeps     . to omitBundledExe . to OS.null
+              , ds ^. extLibDeps                      . to OS.null
+              , ds ^. libDeps     . to omitBundledLib . to OS.null
+              , ds ^. pkgConfDeps                     . to OS.null
+              ]
+
+    omitBundledExe :: OSet ExeDep -> OSet ExeDep
+    omitBundledExe = OS.filter q
+      where
+        q :: ExeDep -> Bool
+        q (KnownBundledExe {}) = False
+        q (KnownPkgsrcExe  {}) = True
+        q (UnknownExe      {}) = True
+
+    omitBundledLib :: OSet LibDep -> OSet LibDep
+    omitBundledLib = OS.filter q
+      where
+        q :: LibDep -> Bool
+        q (KnownBundledLib {}) = False
+        q (KnownPkgsrcLib  {}) = True
+        q (UnknownLib      {}) = True
 
 genSingleComponentAST :: HasCallStack => PackageMeta -> ComponentMeta -> Makefile PlainAST
 genSingleComponentAST pm cm

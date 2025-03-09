@@ -1,6 +1,6 @@
 {-# LANGUAGE TemplateHaskell #-}
 module Cabal2Pkg.Extractor.Dependency
-  ( DepSet(..), exeDeps, extLibDeps, libDeps, pkgConfDeps
+  ( DepSet(..), isBuildable, exeDeps, extLibDeps, libDeps, pkgConfDeps
   , extractDeps
   ) where
 
@@ -25,10 +25,13 @@ import Lens.Micro.Platform ((^.), makeLenses)
 -- |A set of various kinds of dependencies, such as tool dependencies,
 -- Haskell library dependencies, pkg-config dependencies, and external
 -- library dependencies. It preserves the order of dependencies apear in
--- package metadata.
+-- package metadata. It also has a boolean flag indicating whether the
+-- component is buildable or not, which has nothing to do with
+-- dependencies, but has nowhere else to go.
 data DepSet
   = DepSet
-    { _exeDeps     :: !(OSet ExeDep)
+    { _isBuildable :: !Bool
+    , _exeDeps     :: !(OSet ExeDep)
     , _extLibDeps  :: !(OSet ExtLibDep)
     , _libDeps     :: !(OSet LibDep)
     , _pkgConfDeps :: !(OSet PkgConfDep)
@@ -39,7 +42,8 @@ makeLenses ''DepSet
 
 instance Semigroup DepSet where
   a <> b =
-    DepSet { _exeDeps     = OS.unbiased $ Bias @L (a^.exeDeps    ) <> Bias @L (b^.exeDeps)
+    DepSet { _isBuildable = a^.isBuildable && b^.isBuildable
+           , _exeDeps     = OS.unbiased $ Bias @L (a^.exeDeps    ) <> Bias @L (b^.exeDeps)
            , _extLibDeps  = OS.unbiased $ Bias @L (a^.extLibDeps ) <> Bias @L (b^.extLibDeps)
            , _libDeps     = OS.unbiased $ Bias @L (a^.libDeps    ) <> Bias @L (b^.libDeps)
            , _pkgConfDeps = OS.unbiased $ Bias @L (a^.pkgConfDeps) <> Bias @L (b^.pkgConfDeps)
@@ -47,7 +51,8 @@ instance Semigroup DepSet where
 
 instance Monoid DepSet where
   mempty =
-    DepSet { _exeDeps     = OS.empty
+    DepSet { _isBuildable = True
+           , _exeDeps     = OS.empty
            , _extLibDeps  = OS.empty
            , _libDeps     = OS.empty
            , _pkgConfDeps = OS.empty
@@ -55,7 +60,7 @@ instance Monoid DepSet where
 
 extractDeps :: C.PackageDescription -> C.BuildInfo -> Conc CLI DepSet
 extractDeps pkg bi
-  = DepSet <$> execs <*> extLibs <*> libs <*> pkgConfLibs
+  = DepSet (C.buildable bi) <$> execs <*> extLibs <*> libs <*> pkgConfLibs
   where
     execs :: Conc CLI (OSet ExeDep)
     execs = OS.fromList <$> traverse (conc . extractExeDep)
