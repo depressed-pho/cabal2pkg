@@ -10,7 +10,9 @@ New features:
 
 * Added a global option `--fill-column=COLUMN` for specifying page
   width. Currently only used for generating `DESCR` files. Previously it
-  was fixed to 80, but now it's defaulted to 76.
+  was fixed to 80, but now it's defaulted to 76. However, this option is
+  intentionally undocumented because it's meant to be used only for
+  debugging.
 
 Behaviour changes:
 
