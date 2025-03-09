@@ -20,7 +20,7 @@ test:
 	cabal ${CABAL_ARGS} test
 
 .PHONY: run
-run:
+run: all
 	cabal ${CABAL_ARGS} run ${EXE} -- ${ARGS}
 
 PAGER?= less

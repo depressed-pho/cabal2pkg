@@ -44,6 +44,9 @@ Bug fixes:
   get defined when it should.
 * Fixed an issue where ordered, unordered, or definition lists in `DESCR`
   files were sometimes rendered incorrectly.
+* Fixed a bug where `cabal2pkg update` could show a bogus message saying
+  `Deleted buildlink3.mk` when there was no `buildlink3.mk` in the first
+  place.
 
 ## 0.1.1 -- 2025-01-11
 

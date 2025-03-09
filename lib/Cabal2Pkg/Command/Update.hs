@@ -52,7 +52,7 @@ import Prettyprinter ((<+>), Doc)
 import Prettyprinter qualified as PP
 import Prettyprinter.Render.Terminal (AnsiStyle)
 import Prettyprinter.Render.Terminal qualified as PP
-import System.Directory.PosixPath (removePathForcibly, renameFile)
+import System.Directory.PosixPath (doesFileExist, removePathForcibly, renameFile)
 import System.File.PosixPath.Alt (readFile, writeFile, writeFreshFile)
 import System.IO.Error (isDoesNotExistError)
 import System.OsPath.Posix ((</>), PosixPath, PosixString, pstr)
@@ -828,8 +828,9 @@ deleteFile' :: Bool -> PosixPath -> CLI ()
 deleteFile' showMsg name =
   do cfp <- (</> name) <$> canonPkgDir
      ofp <- (</> name) <$> origPkgDir
+     exi <- doesFileExist cfp
      removePathForcibly cfp
-     when showMsg . info $ "Deleted " <> prettyAnsi ofp
+     when (showMsg && exi) . info $ "Deleted " <> prettyAnsi ofp
 
 -- |Reinterpret DISTNAME as a Cabal package identifier. This is guaranteed
 -- to be a valid interpretation as long as the package Makefile includes
