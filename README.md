@@ -9,7 +9,7 @@ DO NOT EDIT: This file is generated with the following command:
 # SYNOPSIS
 
 `cabal2pkg` \[option...\] `init` \[`-w`\| `--overwrite`\]
-`PACKAGE-URI`  
+\[PACKAGE-URI\]  
 `cabal2pkg` \[option...\] `update` \[`-f`\| `--force`\] \[`-m` `STYLE`\|
 `--merge`=`STYLE`\] \[`PACKAGE-URI`\]
 
@@ -119,11 +119,11 @@ this:
 `--fill-column`=`COLUMN`  
 Column beyond which line-wrapping should happen. Only used for
 <span class="Pa">DESCR</span> files at the time of writing this manual
-page.
+page. Note that this option is meant to be used only for debugging.
 
 `--ghc`=`FILE`  
 The path to GHC executable. This is mostly used for locating the Haskell
-package directory. Its default value is determined at the build time.
+package directory. When it is omitted it will be searched from `PATH`.
 
 `--make`=`FILE`  
 The path to BSD <span class="Xr">make(1)</span> command. Its default
@@ -141,8 +141,9 @@ Display the version of `cabal2pkg`.
 `init`  
 The `init` subcommand initialises the current directory (or whatever
 directory specified with `-p`) with a newly created pkgsrc package. This
-subcommand takes a single positional argument `PACKAGE-URI` specifying
-which Haskell package to import. It can be one of the following:
+subcommand optionally takes a single positional argument `PACKAGE-URI`
+specifying which Haskell package to import. It can be one of the
+following:
 
 - `http://` or `https://` URL of a package tarball. This is a preferred
   way of importing packages that are not registered to Hackage.
@@ -155,6 +156,9 @@ which Haskell package to import. It can be one of the following:
 - The name of a package to retrieve from Hackage, in the form of `NAME`
   or `NAME`-`VERSION` (e.g. `foo-0.1.2`). If the version is omitted, the
   latest available (and non-deprecated) one will be chosen.
+
+If `PACKAGE-URI` is omitted, it will be inferred from the name of the
+package directory and assumed to be available in Hackage.
 
 The `init` subcommand can additionally take the following options:
 
@@ -272,7 +276,7 @@ running `make` will certainly fail in that case.
     % cd /usr/pkgsrc
     % mkdir devel/hs-foo
     % cd devel/hs-foo
-    % cabal2pkg init foo-1.0
+    % cabal2pkg init  # Attempts to retrieve "foo" from Hackage
 
 ## Importing a package from a random site
 
