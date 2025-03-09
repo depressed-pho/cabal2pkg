@@ -52,6 +52,8 @@ data ExeDep
       -- used when 'Cabal2Pkg.Extractor.summariseCabal' cannot find the
       -- corresponding package in pkgsrc.
       name :: !PackageName
+      -- |The range of versions that is acceptable.
+    , verRange :: !VersionRange
     }
   deriving (Data, Show)
 
@@ -126,7 +128,11 @@ extractExeDep (C.ExeDependency pkgName _ range)
       }
 
     notFound :: ExeDep
-    notFound = UnknownExe { name = pkgName }
+    notFound =
+      UnknownExe
+      { name     = pkgName
+      , verRange = range
+      }
 
 lookupBundled :: C.ProgramDb -> C.PackageName -> Maybe Version
 lookupBundled progs pkgName

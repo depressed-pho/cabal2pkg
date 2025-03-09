@@ -11,7 +11,7 @@ import Cabal2Pkg.CmdLine
   , withPkgFlagsHidden, withPkgFlagsModified, withMaintainer, withOwner
   , wantCommitMsg )
 import Cabal2Pkg.Command.Common
-  ( command, command', option, fetchMeta, shouldHaveBuildlink3, warnOutdated )
+  ( command, command', option, fetchMeta, shouldHaveBuildlink3, warnDeps )
 import Cabal2Pkg.Extractor (PackageMeta(distBase, distVersion, origin))
 import Cabal2Pkg.Generator.Buildlink3 (genBuildlink3)
 import Cabal2Pkg.Generator.CommitMsg (genUpdateMsg)
@@ -372,7 +372,7 @@ examineNewMeta opts@(UpdateOptions {..}) pkg pkgId pkgURI =
                  . withMaintainer mtr
                  . withOwner owr
                  $ fetchMeta pkgURI
-     warnOutdated newMeta
+     warnDeps newMeta
      let cont = examineOldMeta opts pkg oldFlags newMeta
      case pkgURI of
        Hackage {} -> cont

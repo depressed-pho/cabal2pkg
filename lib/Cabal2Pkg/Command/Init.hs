@@ -10,7 +10,7 @@ import Cabal2Pkg.CmdLine
   , origPkgDir, makeCmd, pkgBase, runMake, wantCommitMsg )
 import Cabal2Pkg.Command.Common
   ( command, option, fetchMeta, shouldHaveBuildlink3, shouldHaveHsPrefix
-  , warnOutdated )
+  , warnDeps )
 import Cabal2Pkg.Extractor (PackageMeta(distBase))
 import Cabal2Pkg.Generator.Buildlink3 (genBuildlink3)
 import Cabal2Pkg.Generator.CommitMsg (genImportMsg)
@@ -59,7 +59,7 @@ run (InitOptions {..}) =
                , "remote file instead."
                ]
      meta <- fetchMeta pkgURI
-     warnOutdated meta
+     warnDeps meta
 
      canonDir <- canonPkgDir
      validatePkgPath meta

@@ -35,6 +35,7 @@ Behaviour changes:
 * `cabal2pkg update` now tries to update `HASKELL_UNRESTRICT_DEPENDENCIES`
   even when the package is already the latest one.
 * Newlines in `COMMENT` are now replaced with spaces.
+* `cabal2pkg` now displays warnings about unknown dependencies.
 
 Bug fixes:
 

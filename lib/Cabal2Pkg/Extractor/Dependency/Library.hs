@@ -56,6 +56,8 @@ data LibDep
       -- cannot find the corresponding package in pkgsrc or bundled
       -- libraries in the compiler.
       name :: !PackageName
+      -- |The range of versions that is acceptable.
+    , verRange :: !VersionRange
     }
   deriving (Data, Show)
 
@@ -131,7 +133,11 @@ extractLibDep dep
       }
 
     notFound :: LibDep
-    notFound = UnknownLib { name = C.depPkgName dep }
+    notFound =
+      UnknownLib
+      { name     = C.depPkgName dep
+      , verRange = C.depVerRange dep
+      }
 
 lookupBundled :: C.InstalledPackageIndex -> C.PackageName -> Maybe Version
 lookupBundled ipi name

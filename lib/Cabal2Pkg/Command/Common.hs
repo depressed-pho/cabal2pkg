@@ -8,7 +8,7 @@ module Cabal2Pkg.Command.Common
   , fetchMeta
   , shouldHaveBuildlink3
   , shouldHaveHsPrefix
-  , warnOutdated
+  , warnDeps
   ) where
 
 import Cabal2Pkg.CmdLine (CLI, debug, info, warn)
@@ -110,8 +110,8 @@ shouldHaveHsPrefix meta
 
 -- |Warn about dependencies that are too old to satisfy version
 -- constraints.
-warnOutdated :: PackageMeta -> CLI ()
-warnOutdated pm = everything (>>) go pm
+warnDeps :: PackageMeta -> CLI ()
+warnDeps pm = everything (>>) go pm
   where
     go :: GenericQ (CLI ())
     go = mkQ (pure ()) checkExeDep `extQ` checkLibDep
@@ -152,7 +152,13 @@ warnOutdated pm = everything (>>) go pm
                          , "but this version constraint is impossible to satisfy."
                          , command', "does not know what to do."
                          ]
-    checkExeDep (UnknownExe {}) = pure ()
+    checkExeDep (UnknownExe {..}) =
+      warn $ PP.hsep [ prettyAnsi pkgId, "requires a tool"
+                     , prettyAnsi name, prettyAnsi verRange
+                     , "but there are no pkgsrc packages providing it."
+                     , "You first need to package it to build"
+                     , prettyAnsi pkgId <> "."
+                     ]
 
     checkLibDep :: LibDep -> CLI ()
     checkLibDep (KnownBundledLib {..}) =
@@ -187,4 +193,10 @@ warnOutdated pm = everything (>>) go pm
                          , "but this version constraint is impossible to satisfy."
                          , command', "does not know what to do."
                          ]
-    checkLibDep (UnknownLib {}) = pure ()
+    checkLibDep (UnknownLib {..}) =
+      warn $ PP.hsep [ prettyAnsi pkgId, "requires a library"
+                     , prettyAnsi name, prettyAnsi verRange
+                     , "but there are no pkgsrc packages providing it."
+                     , "You first need to package it to build"
+                     , prettyAnsi pkgId <> "."
+                     ]
