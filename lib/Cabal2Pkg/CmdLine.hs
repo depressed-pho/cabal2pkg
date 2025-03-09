@@ -122,7 +122,7 @@ data Command
 data InitOptions
   = InitOptions
     { optOverwrite  :: !Bool
-    , optPackageURI :: !URI
+    , optPackageURI :: !(Maybe URI)
     }
   deriving (Show)
 
@@ -340,16 +340,19 @@ commandP =
                    , OA.short 'w'
                    , OA.help "Overwrite existing files"
                    ])
-      <*> OA.argument uriReference
-          (mconcat [ OA.help $ mconcat
-                     [ "http, https, or file URI to a package tarball."
-                     , " Or just a package name such as \"foo\" if the"
-                     , " package is from the Hackage repository. In the"
-                     , " latter case a version number can also be specified"
-                     , " like \"foo-0.1.2\""
-                     ]
-                   , OA.metavar "PACKAGE-URI"
-                   ])
+      <*> optional
+          ( OA.argument uriReference
+            (mconcat [ OA.help $ mconcat
+                       [ "http, https, or file URI to a package tarball."
+                       , " Or just a package name such as \"foo\" if the"
+                       , " package is from the Hackage repository. In the"
+                       , " latter case a version number can also be specified"
+                       , " like \"foo-0.1.2\". If it is omitted it will be"
+                       , " inferred from the package directory"
+                       ]
+                     , OA.metavar "PACKAGE-URI"
+                     ])
+          )
 
     updateP :: Parser Command
     updateP =

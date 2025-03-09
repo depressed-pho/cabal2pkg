@@ -12,6 +12,9 @@ New features:
   width. Currently only used for generating `DESCR` files. Previously it
   was fixed to 80, but now it's defaulted to 76. This options is only meant
   to be used for debugging.
+* `cabal2pkg init` now infers a package from the name of the directory if
+  no package URI is given. The package is assumed to be available in
+  Hackage in this case.
 
 Behaviour changes:
 

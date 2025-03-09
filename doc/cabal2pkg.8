@@ -17,7 +17,7 @@
 .Op option Ns ...
 .Cm init
 .Op Fl w Ns | Ns Fl \-overwrite
-.Ar PACKAGE-URI
+.Op PACKAGE-URI
 .Nm
 .Op option Ns ...
 .Cm update
@@ -202,8 +202,8 @@ The
 subcommand initialises the current directory (or whatever directory
 specified with
 .Fl p )
-with a newly created pkgsrc package.  This subcommand takes a single
-positional argument
+with a newly created pkgsrc package.  This subcommand optionally takes a
+single positional argument
 .Ar PACKAGE-URI
 specifying which Haskell package to import.  It can be one of the
 following:
@@ -231,6 +231,11 @@ or
 If the version is omitted, the latest available (and non-deprecated) one
 will be chosen.
 .El
+.Pp
+If
+.Ar PACKAGE-URI
+is omitted, it will be inferred from the name of the package directory and
+assumed to be available in Hackage.
 .Pp
 The
 .Cm init
@@ -408,7 +413,7 @@ will certainly fail in that case.
 % cd /usr/pkgsrc
 % mkdir devel/hs-foo
 % cd devel/hs-foo
-% cabal2pkg init foo-1.0
+% cabal2pkg init  # Attempts to retrieve "foo" from Hackage
 .Ed
 .Ss Importing a package from a random site
 .Bd -literal -offset indent

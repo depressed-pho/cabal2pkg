@@ -17,13 +17,17 @@ import Cabal2Pkg.Generator.CommitMsg (genImportMsg)
 import Cabal2Pkg.Generator.Description (genDESCR)
 import Cabal2Pkg.Generator.Makefile (genMakefile)
 import Cabal2Pkg.Pretty (Quoted(..), prettyAnsi)
-import Cabal2Pkg.Site (isFromLocalFS, parsePackageURI)
+import Cabal2Pkg.Site
+  ( PackageURI(Hackage), isFromLocalFS, parsePackageURI, renderPackageURI )
+import Cabal2Pkg.Site.Hackage (HackageDist(..))
 import Control.Exception.Safe (catch, throw)
 import Control.Monad (when)
 import Data.CaseInsensitive qualified as CI
+import Data.List qualified as L
 import Data.Text.Lazy qualified as TL
 import Data.Text.Lazy.Encoding qualified as TL
 import Distribution.Pretty (prettyShow)
+import Distribution.Types.PackageName (mkPackageName)
 import GHC.Stack (HasCallStack)
 import Prelude hiding (exp, writeFile)
 import Prettyprinter qualified as PP
@@ -35,7 +39,17 @@ import System.OsPath.Posix qualified as OP
 
 run :: HasCallStack => InitOptions -> CLI ()
 run (InitOptions {..}) =
-  do pkgURI <- parsePackageURI Nothing optPackageURI
+  do pkgURI <- case optPackageURI of
+                 Nothing ->
+                   do pkgURI <- inferPackageURI
+                      uri'   <- renderPackageURI pkgURI
+                      info $ PP.hsep [ "No package URI was given."
+                                     , "Inferred from the package directory as"
+                                     , prettyAnsi uri'
+                                     ]
+                      pure pkgURI
+                 Just uri ->
+                   parsePackageURI Nothing uri
      when (isFromLocalFS pkgURI) . warn $
        PP.hsep [ "You are initialising a package with a tarball on the local filesystem."
                , command "init"
@@ -112,6 +126,14 @@ run (InitOptions {..}) =
              pure ()
            else
              throw e
+
+inferPackageURI :: CLI PackageURI
+inferPackageURI =
+  do dirName <- OP.decodeUtf =<< OP.takeFileName <$> canonPkgDir
+     let pkgName
+           | "hs-" `L.isPrefixOf` dirName = drop 3 dirName
+           | otherwise                    = dirName
+     pure . Hackage $ HackageDist (mkPackageName pkgName) Nothing
 
 initialPLIST :: CLI TL.Text
 initialPLIST =
