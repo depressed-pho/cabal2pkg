@@ -6,6 +6,7 @@ module Test.Language.BMake.AST.Pretty
   ) where
 
 import Data.FileEmbed (embedStringFile, makeRelativeToProject)
+import Data.List.NonEmpty qualified as NE
 import Data.Text.Lazy qualified as TL
 import Language.BMake.AST.Plain
 import Language.BMake.AST.Types
@@ -28,3 +29,20 @@ ex00' = Makefile
 test =
   testCase "generate example-00.mk" $
   prettyPrintMakefile ex00' @?= ex00
+
+-- example-01
+ex01 :: TL.Text
+ex01 = $(makeRelativeToProject "tests/data/example-01.mk" >>= embedStringFile)
+
+ex01' :: Makefile PlainAST
+ex01' = Makefile
+        [ BDirective . DConditional $
+          Conditional True ( NE.fromList [ CondBranch (Ifdef () True (Expr () (Value () "FOO")) Nothing)
+                                           (Makefile [ include "foo.mk" ])
+                                         ]
+                           ) Nothing (EndIf () Nothing)
+        ]
+
+test =
+  testCase "generate example-01.mk" $
+  prettyPrintMakefile ex01' @?= ex01

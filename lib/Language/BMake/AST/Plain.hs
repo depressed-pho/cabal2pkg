@@ -286,8 +286,8 @@ instance Pretty (Conditional PlainAST) where
 
       pprBranches :: NonEmpty (CondBranch PlainAST) -> Doc ann
       pprBranches (br :| brs) =
-        pretty (True, contentDepth) br <>
-        mconcat (pretty (False, contentDepth) <$> brs)
+        pretty (True, depth, contentDepth) br <>
+        mconcat (pretty (False, depth, contentDepth) <$> brs)
 
 instance Pretty (Else PlainAST) where
   -- |The current and the content depth of nested directives.
@@ -309,12 +309,13 @@ instance Pretty (EndIf PlainAST) where
 
 instance Pretty (CondBranch PlainAST) where
   -- |The 'Bool' value indicates whether the branch is the first one,
-  -- e.g. @.if@ as opposed to @.elif@. The 'Int' value represents the
-  -- desired, not current, depth of nested directives.
-  type Context (CondBranch PlainAST) = (Bool, Int)
-  pretty ctx@(_, depth) (CondBranch cond m) =
-    PP.vsep [ pretty ctx cond
-            , pretty depth m
+  -- e.g. @.if@ as opposed to @.elif@. The first 'Int' value represents the
+  -- current depth. The second 'Int' value represents the desired, not
+  -- current, depth of nested directives.
+  type Context (CondBranch PlainAST) = (Bool, Int, Int)
+  pretty (isFirst, depth, contentDepth) (CondBranch cond m) =
+    PP.vsep [ pretty (isFirst, depth) cond
+            , pretty contentDepth m
             ]
 
 instance Pretty (Condition PlainAST) where
@@ -324,8 +325,8 @@ instance Pretty (Condition PlainAST) where
     where
       go :: Condition PlainAST -> Doc ann
       go (If      _   expr com) = switch    "if"        <+> pretty (False, ()) expr <> pprOptionalComment com
-      go (Ifdef   _ n expr com) = switch' n "if" "def"  <+> pretty (False, ()) expr <> pprOptionalComment com
-      go (Ifmake  _ n expr com) = switch' n "if" "make" <+> pretty (False, ()) expr <> pprOptionalComment com
+      go (Ifdef   _ p expr com) = switch' p "if" "def"  <+> pretty (False, ()) expr <> pprOptionalComment com
+      go (Ifmake  _ p expr com) = switch' p "if" "make" <+> pretty (False, ()) expr <> pprOptionalComment com
 
       switch :: Doc ann -> Doc ann
       switch d
@@ -333,12 +334,12 @@ instance Pretty (Condition PlainAST) where
         | otherwise = "el" <> d
 
       switch' :: Bool -> Doc ann -> Doc ann -> Doc ann
-      switch' n d0 d1
+      switch' p d0 d1
         | isFirst   = d
         | otherwise = "el" <> d
         where
-          d | n         = d0 <> "n" <> d1
-            | otherwise = d0 <> d1
+          d | p         = d0 <> d1
+            | otherwise = d0 <> "n" <> d1
 
 instance Pretty a => Pretty (LogicalExpr PlainAST a) where
   -- |Whether the expression is a nested one.

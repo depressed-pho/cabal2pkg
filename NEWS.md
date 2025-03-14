@@ -55,6 +55,8 @@ Bug fixes:
 * Fixed an issue where package components (e.g. `lib:*`) with no visible
   dependencies could survive garbage collection in certain cases, leaving
   empty sections in Makefiles.
+* Fixed an issue where Makefile conditionals could be rendered with wrong
+  indentation.
 
 ## 0.1.1 -- 2025-01-11
 
