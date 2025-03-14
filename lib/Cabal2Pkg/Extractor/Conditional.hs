@@ -311,10 +311,24 @@ instance (Eq a, Monoid a) => GarbageCollectable (CondBranch a) where
 instance Simplifiable Condition where
   simplify c@(Literal _) = c
 
-  simplify (Not c)
-    = case simplify c of
-        Literal b -> Literal (not b)
-        c'        -> Not c'
+  simplify (Not c) =
+    case simplify c of
+      Literal b ->
+        Literal (not b)
+
+      Not c' ->
+        -- Eliminate "Not Not".
+        c'
+
+      e@(Expr {..})
+        | Just e' <- negateExpr expression ->
+            -- If the immediate subexpression of Not is a comparison, we
+            -- can eliminate the Not operator by negating the
+            -- comparison. This is what pkglint wants us to do.
+            e { expression = e' }
+
+      c' ->
+        Not c'
 
   simplify (Or a b)
     = case simplify a of
@@ -337,3 +351,17 @@ instance Simplifiable Condition where
             b'            -> And a' b'
 
   simplify c@(Expr {}) = c
+
+negateExpr :: AST.Expr PlainAST -> Maybe (AST.Expr PlainAST)
+negateExpr cmp@(AST.ECompare {..})
+  | Just (op, rhs) <- eCmpRHS =
+      let op' = case op of
+                  AST.EQ -> AST.NE
+                  AST.NE -> AST.EQ
+                  AST.LT -> AST.GE
+                  AST.LE -> AST.GT
+                  AST.GT -> AST.LE
+                  AST.GE -> AST.LT
+      in
+        Just $ cmp { AST.eCmpRHS = Just (op', rhs) }
+negateExpr _ = Nothing

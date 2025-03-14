@@ -57,6 +57,10 @@ Bug fixes:
   empty sections in Makefiles.
 * Fixed an issue where Makefile conditionals could be rendered with wrong
   indentation.
+* Cabal conditionals like `if !arch(x86_64)` are now translated to Makefile
+  conditionals like `.if ${MACHINE_ARCH} != "x86_64"`. Previously they were
+  translated to `.if !(${MACHINE_ARCH} == "x86_64")`, which were correct
+  but weren't optimal.
 
 ## 0.1.1 -- 2025-01-11
 
