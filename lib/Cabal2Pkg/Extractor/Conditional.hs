@@ -244,8 +244,8 @@ extractArchCond arch
 -- parent node and discard its 'ifFalse'. If it folds to 'False' we do the
 -- opposite. This means @'CondBlock' a@ has to form a semigroup.
 instance Semigroup a => Simplifiable (CondBlock a) where
-  simplify block
-    = foldl' go (block & branches .~ []) (block ^. branches)
+  simplify block =
+    foldl' go (block & branches .~ []) (block ^. branches)
     where
       go :: CondBlock a -> CondBranch a -> CondBlock a
       go bl br
@@ -259,21 +259,23 @@ instance Semigroup a => Simplifiable (CondBlock a) where
 -- empty 'always' part. If that's the case we can merge the branch to the
 -- parent block.
 floatBranches :: forall a. (Eq a, Monoid a) => CondBlock a -> CondBlock a
-floatBranches block
-  = foldl' go (block & branches .~ []) (block ^. branches)
+floatBranches block =
+  foldl' go (block & branches .~ []) (block ^. branches)
   where
     go :: CondBlock a -> CondBranch a -> CondBlock a
-    go bl br
-      = case br ^. ifFalse of
-          Nothing -> bl & branches %~ (<> [br])
+    go bl br =
+      let br' = br & ifTrue %~ floatBranches
+      in
+        case br' ^. ifFalse of
+          Nothing -> bl & branches %~ (<> [br'])
           Just bl'
             | bl' ^. always == mempty
-                -> let br'  = br & ifFalse .~ Nothing
+                -> let br'' = br' & ifFalse .~ Nothing
                        bl'' = floatBranches bl'
                    in
-                     bl & branches %~ (<> (br' : bl'' ^. branches))
+                     bl & branches %~ (<> (br'' : bl'' ^. branches))
             | otherwise
-                -> bl & branches %~ (<> [br])
+                -> bl & branches %~ (<> [br'])
 
 instance (Eq a, Monoid a) => GarbageCollectable (CondBlock a) where
   garbageCollect block

@@ -61,6 +61,8 @@ Bug fixes:
   conditionals like `.if ${MACHINE_ARCH} != "x86_64"`. Previously they were
   translated to `.if !(${MACHINE_ARCH} == "x86_64")`, which were correct
   but weren't optimal.
+* Fix an issue where `cabal2pkg` sometimes fails to simplify Makefile
+  conditionals properly, leaving empty `.else` .. `.endif` blocks.
 
 ## 0.1.1 -- 2025-01-11
 
