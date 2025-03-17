@@ -6,8 +6,9 @@
 {-# LANGUAGE TemplateHaskell #-}
 module Cabal2Pkg.Extractor.Conditional
   ( Environment(..)
-  , CondBlock(..), always, branches
-  , CondBranch(..), condition, ifTrue, ifFalse
+  , CondBlock(..), always, conds
+  , Conditional(..), branches, condElse
+  , CondBranch(..), condition, condBlock
   , Condition(..)
   , extractCondBlock
   ) where
@@ -15,8 +16,9 @@ module Cabal2Pkg.Extractor.Conditional
 import Cabal2Pkg.CmdLine (FlagMap)
 import Control.Monad.IO.Unlift (MonadUnliftIO)
 import Data.Data (Data)
+import Data.Filtrable (mapMaybe)
+import Data.IsNull (IsNull(..))
 import Data.Map.Strict qualified as M
-import Data.Maybe (isNothing)
 import Data.Text (Text)
 import Distribution.Compiler qualified as C
 import Distribution.System qualified as C
@@ -30,7 +32,8 @@ import GHC.Generics (Generic, Generically(..))
 import GHC.Stack (HasCallStack)
 import Language.BMake.AST.Plain ((?==), PlainAST)
 import Language.BMake.AST qualified as AST
-import Lens.Micro.Platform ((&), (^.), (%~), (.~), makeLenses)
+import Lens.Micro.Platform ((&), (^.), (%~), (.~), makeLenses, traversed)
+import Prelude hiding (filter)
 import UnliftIO.Async (Conc, runConc)
 
 class Simplifiable a where
@@ -45,19 +48,79 @@ data Environment = Environment
   }
   deriving Show
 
+-- |This type represents a block of Cabal conditional.
+--
+-- > if flag(foo)
+-- >   build-depends: foo
+-- >
+-- >   if flag(bar)
+-- >     build-depends: bar
+-- >
+-- >   if flag(baz)
+-- >     build-depends: baz
+-- >   else
+-- >     build-depends: qux
+--
+-- The example Cabal conditional above is represented as follows:
+--
+-- > CondBlock
+-- > { _always = {- build-depends: foo -}
+-- > , _conds  =
+-- >     [ Conditional
+-- >       { _branches =
+-- >           [ CondBranch
+-- >             { _condition = {- flag(bar) -}
+-- >             , _block     =
+-- >                 CondBlock
+-- >                 { _always = {- build-depends: bar -}
+-- >                 , _conds  = []
+-- >                 }
+-- >             }
+-- >           ]
+-- >       , _else = Nothing
+-- >       }
+-- >     , Conditional
+-- >       { _branches =
+-- >           [ CondBranch
+-- >             { _condition = {- flag(baz) -}
+-- >             , _block     =
+-- >                 CondBlock
+-- >                 { _always = {- build-depends: baz -}
+-- >                 , _conds  = []
+-- >                 }
+-- >             }
+-- >           ]
+-- >       , _else =
+-- >           Just ( CondBranch
+-- >                  { _always = {- build-depends: qux -}
+-- >                  , _conds  = []
+-- >                  }
+-- >                )
+-- >       }
+-- >     ]
+-- > }
+--
+-- Note that 'Conditional's in a 'CondBlock' are completely independent to
+-- each other. They don't form a "if ... elif" relationship. "elif" is
+-- represented by 'Conditional' having more than a single 'CondBranch'.
 data CondBlock a = CondBlock
-  { _always   :: !a
-  , _branches :: ![CondBranch a]
+  { _always :: !a
+  , _conds  :: ![Conditional a]
   }
-  deriving (Data, Eq, Functor, Foldable, Generic, Show, Traversable)
+  deriving (Data, Eq, Functor, Generic, Show)
   deriving (Monoid, Semigroup) via Generically (CondBlock a)
+
+data Conditional a = Conditional
+  { _branches :: ![CondBranch a]
+  , _condElse :: !(Maybe (CondBlock a))
+  }
+  deriving (Data, Eq, Functor, Generic, Show)
 
 data CondBranch a = CondBranch
   { _condition :: !Condition
-  , _ifTrue    :: !(CondBlock a)
-  , _ifFalse   :: !(Maybe (CondBlock a))
+  , _condBlock :: !(CondBlock a)
   }
-  deriving (Data, Eq, Functor, Foldable, Generic, Show, Traversable)
+  deriving (Data, Eq, Functor, Generic, Show)
 
 -- |An intermediate data type for Cabal conditions.
 data Condition
@@ -74,8 +137,21 @@ data Condition
   deriving (Data, Eq, Show)
 
 makeLenses ''CondBlock
+makeLenses ''Conditional
 makeLenses ''CondBranch
 
+instance IsNull a => IsNull (CondBlock a) where
+  isNull bl =
+        isNull (bl ^. always) &&
+    all isNull (bl ^. conds )
+
+instance IsNull a => IsNull (Conditional a) where
+  isNull cd =
+    all isNull (cd ^. branches) &&
+    all isNull (cd ^. condElse)
+
+instance IsNull a => IsNull (CondBranch a) where
+  isNull = isNull . (^. condBlock)
 
 -- |Conditionals in the Cabal AST is fucking irritatingly
 -- incomprehensible. I simply cannot get the point of the type variable @c@
@@ -84,10 +160,10 @@ makeLenses ''CondBranch
 -- the fucking AST?
 extractCondBlock :: forall m a a' _c c' .
                     ( HasCallStack
+                    , IsNull c'
                     , MonadUnliftIO m
-                    , Semigroup (m c')
                     , Monoid c'
-                    , Eq c'
+                    , Semigroup (m c')
                     )
                  => (a -> Conc m c')
                  -> (a -> CondBlock c' -> a')
@@ -97,44 +173,52 @@ extractCondBlock :: forall m a a' _c c' .
 extractCondBlock extractContent extractOuter env = go
   where
     go :: HasCallStack => C.CondTree C.ConfVar _c a -> m a'
-    go tree
-      = do block <- (floatBranches . garbageCollect <$>)
-                    . runConc
-                    . forceBlock
-                    . simplify
-                    $ mkBlock tree
-           pure $ extractOuter (C.condTreeData tree) block
+    go tree =
+      do block <- (floatConditionals . garbageCollect <$>)
+                  . runConc
+                  . forceBlock
+                  . simplify
+                  $ mkBlock tree
+         pure $ extractOuter (C.condTreeData tree) block
 
     forceBlock :: HasCallStack => CondBlock (Conc m c') -> Conc m (CondBlock c')
-    forceBlock bl
-      = CondBlock
-        <$> bl ^. always
-        <*> traverse forceBranch (bl ^. branches)
+    forceBlock bl =
+      CondBlock
+      <$> bl ^. always
+      <*> traverse forceConditional (bl ^. conds)
+
+    forceConditional :: HasCallStack => Conditional (Conc m c') -> Conc m (Conditional c')
+    forceConditional cd =
+      Conditional
+      <$> traverse forceBranch (cd ^. branches)
+      <*> traverse forceBlock  (cd ^. condElse)
 
     forceBranch :: HasCallStack => CondBranch (Conc m c') -> Conc m (CondBranch c')
-    forceBranch br
-      = CondBranch (br ^. condition)
-        <$> forceBlock (br ^. ifTrue)
-        <*> traverse forceBlock (br ^. ifFalse)
+    forceBranch br =
+      CondBranch (br ^. condition)
+      <$> forceBlock (br ^. condBlock)
 
     mkBlock :: HasCallStack
             => C.CondTree C.ConfVar _c a
             -> CondBlock (Conc m c')
-    mkBlock tree
-      = CondBlock
-        { _always   = extractContent $ C.condTreeData tree
-        , _branches = extractBranch <$> C.condTreeComponents tree
-        }
+    mkBlock tree =
+      CondBlock
+      { _always = extractContent $ C.condTreeData tree
+      , _conds  = extractConditional <$> C.condTreeComponents tree
+      }
 
-    extractBranch :: HasCallStack
-                  => C.CondBranch C.ConfVar _c a
-                  -> CondBranch (Conc m c')
-    extractBranch branch
-      = CondBranch
-        { _condition = extractCondition $ C.condBranchCondition branch
-        , _ifTrue    = mkBlock $ C.condBranchIfTrue branch
-        , _ifFalse   = mkBlock <$> C.condBranchIfFalse branch
-        }
+    extractConditional :: HasCallStack
+                       => C.CondBranch C.ConfVar _c a
+                       -> Conditional (Conc m c')
+    extractConditional branch =
+      Conditional
+      { _branches = [ CondBranch
+                      { _condition = extractCondition $ C.condBranchCondition branch
+                      , _condBlock = mkBlock $ C.condBranchIfTrue branch
+                      }
+                    ]
+      , _condElse = mkBlock <$> C.condBranchIfFalse branch
+      }
 
     extractCondition :: HasCallStack => C.Condition C.ConfVar -> Condition
     extractCondition c
@@ -170,7 +254,7 @@ extractOSCond :: C.OS -> Condition
 extractOSCond os
   = case os of
       C.Linux     -> c "Linux"
-      -- Windows is special. It's one of a few non-POSIX compatible OS and
+      -- Windows is special. It's one of a few POSIX incompatible OSes and
       -- requires a lot of glue code to run regular Haskell
       -- programs. pkgsrc doesn't support Windows. We can safely assume
       -- we're not on it.
@@ -239,76 +323,138 @@ extractArchCond arch
         , needsPrefs = True
         }
 
--- |For each branch in a 'CondBlock', see if its 'condition' can be folded
--- to a constant. If it folds to 'True' merge its 'ifTrue' back to the
--- parent node and discard its 'ifFalse'. If it folds to 'False' we do the
--- opposite. This means @'CondBlock' a@ has to form a semigroup.
-instance Semigroup a => Simplifiable (CondBlock a) where
-  simplify block =
-    foldl' go (block & branches .~ []) (block ^. branches)
+-- |For each 'Conditional' in a 'CondBlock', if it has no branches, merge
+-- its 'condElse' to the block. If it has a single 'CondBranch' whose
+-- 'condition' can be folded to a constant, and if it folds to 'True' merge
+-- its 'condBlock' back to the parent block and discard the 'condElse' of
+-- the 'Conditional'. If it folds to 'False' we do the opposite.
+instance Monoid a => Simplifiable (CondBlock a) where
+  simplify block = bl0 <> foldr go mempty (block ^. conds)
     where
-      go :: CondBlock a -> CondBranch a -> CondBlock a
-      go bl br
-        = let br' = simplify br
-          in case simplify $ br' ^. condition of
-               Literal True  -> bl <> br' ^. ifTrue
-               Literal False -> maybe bl (bl <>) (br' ^. ifFalse)
-               _             -> bl & branches %~ (<> [br'])
+      bl0 :: CondBlock a
+      bl0 = block & conds .~ []
 
--- |For each branch in a 'CondBlock', see if its 'ifFalse' branch has an
--- empty 'always' part. If that's the case we can merge the branch to the
--- parent block.
-floatBranches :: forall a. (Eq a, Monoid a) => CondBlock a -> CondBlock a
-floatBranches block =
-  foldl' go (block & branches .~ []) (block ^. branches)
-  where
-    go :: CondBlock a -> CondBranch a -> CondBlock a
-    go bl br =
-      let br' = br & ifTrue %~ floatBranches
-      in
-        case br' ^. ifFalse of
-          Nothing -> bl & branches %~ (<> [br'])
-          Just bl'
-            | bl' ^. always == mempty
-                -> let br'' = br' & ifFalse .~ Nothing
-                       bl'' = floatBranches bl'
-                   in
-                     bl & branches %~ (<> (br'' : bl'' ^. branches))
-            | otherwise
-                -> bl & branches %~ (<> [br'])
+      go :: Conditional a -> CondBlock a -> CondBlock a
+      go cd bl
+        | [] <- cd' ^. branches =
+            maybe bl (<> bl) (cd' ^. condElse)
+        | (br:[]) <- cd' ^. branches =
+            case br ^. condition of
+              Literal True  -> br ^. condBlock <> bl
+              Literal False -> maybe bl (<> bl) (cd' ^. condElse)
+              _             -> bl & conds %~ (cd':)
+        | otherwise =
+            bl & conds %~ (cd':)
+        where
+          cd' :: Conditional a
+          cd' = simplify cd
 
-instance (Eq a, Monoid a) => GarbageCollectable (CondBlock a) where
-  garbageCollect block
-    = simplify $ block & branches %~ (garbageCollect <$>)
+-- |For each 'CondBranch' in a 'Conditional', see if its 'condition' can be
+-- folded to a constant. If it folds to 'True' discard any of the
+-- subsequent branches (i.e. @.elif@) and 'condElse' (i.e. @.else@). If it
+-- folds to 'False' discard that specific branch.
+instance Monoid a => Simplifiable (Conditional a) where
+  simplify cond = go cd0 (cond ^. branches)
+    where
+      cd0 :: Conditional a
+      cd0 = cond & branches .~ []
+                 & condElse . traversed %~ simplify
 
-instance Semigroup a => Simplifiable (CondBranch a) where
-  simplify
-    = (condition %~ simplify)
-    . (ifTrue    %~ simplify)
-    . (ifFalse   %~ (simplify <$>))
+      go :: Conditional a -> [CondBranch a] -> Conditional a
+      go cd []       = cd
+      go cd (br:brs) =
+        let cd' = go cd brs
+            br' = simplify br
+        in case br' ^. condition of
+             Literal True  -> cd' & branches .~ [br']
+                                  & condElse .~ Nothing
+             Literal False -> cd'
+             _             -> cd' & branches %~ (br':)
 
--- |If the 'ifTrue' branch and the 'ifFalse' branch are both empty, the
--- 'condition' becomes irrelevant so we can turn it into a constant. This
--- means @'CondBlock' a@ has to form a monoid and has to be
--- equality-comparable while doing the garbage-collection.
+-- |For each 'Conditional' in a 'CondBlock', see if its 'condElse' block
+-- has an empty 'always' part and a single 'Conditional'. If that's the
+-- case we can merge the block into its parent 'Conditional'. That is, we
+-- turn this:
+--
+-- > .if AAA
+-- > aaa
+-- > .else
+-- > .  if BBB
+-- > bbb
+-- > .  else
+-- > ccc
+-- > .  endif
+-- > .endif
+--
+-- into this:
+--
+-- > .if AAA
+-- > aaa
+-- > .elif BBB
+-- > bbb
+-- > .else
+-- > ccc
+-- > .endif
+floatConditionals :: IsNull a => CondBlock a -> CondBlock a
+floatConditionals = conds . traversed %~ floatBranches
+
+floatBranches :: IsNull a => Conditional a -> Conditional a
+floatBranches cd
+  | cd' <- cd & branches . traversed . condBlock %~ floatConditionals =
+      case cd' ^. condElse of
+        Just bl
+          | isNull (bl ^. always)
+          , bl'       <- floatConditionals bl
+          , (cd'':[]) <- bl' ^. conds ->
+              cd' & branches %~ (<> cd'' ^. branches)
+                  & condElse .~ (   cd'' ^. condElse)
+        _ -> cd'
+
+-- |Remove any conditionals that are empty.
+instance (IsNull a, Monoid a) => GarbageCollectable (CondBlock a) where
+  garbageCollect = simplify . (conds %~ mapMaybe f)
+    where
+      f :: Conditional a -> Maybe (Conditional a)
+      f cd
+        | isNull cd' = Nothing
+        | otherwise  = Just cd'
+        where
+          cd' :: Conditional a
+          cd' = garbageCollect cd
+
+instance Monoid a => Simplifiable (CondBranch a) where
+  simplify = (condition %~ simplify)
+           . (condBlock %~ simplify)
+
+-- |Remove any branches whose 'CondBlock' is empty, ignoring their
+-- 'Condition'.
 --
 -- Why do we have separate type classes for 'simplify' and
 -- 'garbageCollect'? Because the latter can only be done after forcing
 -- deferred monadic computations. We cannot test if @'Monad' m => m a@ is
--- empty just because @a@ is 'Eq' and 'Monoid', without forcing the
--- computation.
+-- empty just because @a@ is 'IsNull', without forcing the computation.
+instance (IsNull a, Monoid a) => GarbageCollectable (Conditional a) where
+  garbageCollect = (branches %~ mapMaybe f)
+                 . (condElse %~ mapMaybe g)
+    where
+      f :: CondBranch a -> Maybe (CondBranch a)
+      f br
+        | isNull br' = Nothing
+        | otherwise  = Just br'
+        where
+          br' :: CondBranch a
+          br' = garbageCollect br
 
-instance (Eq a, Monoid a) => GarbageCollectable (CondBranch a) where
-  garbageCollect br
-    = let c = br ^. condition
-          t = garbageCollect $ br ^. ifTrue
-          f = garbageCollect <$> br ^. ifFalse
-      in
-        -- These comparisons regarding Maybe aren't beautiful. Can we do
-        -- anything better?
-        if t == mempty && (isNothing f || f == Just mempty)
-        then CondBranch (Literal False) t f
-        else CondBranch c t f
+      g :: CondBlock a -> Maybe (CondBlock a)
+      g bl
+        | isNull bl' = Nothing
+        | otherwise  = Just bl'
+        where
+          bl' :: CondBlock a
+          bl' = garbageCollect bl
+
+instance (IsNull a, Monoid a) => GarbageCollectable (CondBranch a) where
+  garbageCollect = condBlock %~ garbageCollect
 
 instance Simplifiable Condition where
   simplify c@(Literal _) = c

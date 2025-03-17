@@ -9,7 +9,8 @@ module Cabal2Pkg.Generator.Makefile
 import Cabal2Pkg.Extractor (PackageMeta(..))
 import Cabal2Pkg.Extractor.Component (ComponentMeta, ComponentType(..), cType, cName, cDeps)
 import Cabal2Pkg.Extractor.Conditional
-  ( CondBlock, CondBranch, Condition(..), always, branches, condition, ifTrue, ifFalse )
+  ( CondBlock, Conditional, CondBranch, Condition(..)
+  , always, conds, branches, condElse, condition, condBlock )
 import Cabal2Pkg.Extractor.Dependency (DepSet, exeDeps, extLibDeps, libDeps, pkgConfDeps)
 import Cabal2Pkg.Extractor.Dependency.Executable (ExeDep(..))
 import Cabal2Pkg.Extractor.Dependency.ExternalLib (ExtLibDep(..))
@@ -24,13 +25,14 @@ import Data.Data (gmapQl)
 import Data.Foldable (toList)
 import Data.Generics.Aliases (GenericQ, mkQ, extQ)
 import Data.Generics.Schemes (everything)
+import Data.List qualified as L
+import Data.List.NonEmpty (NonEmpty((:|)))
+import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Set (Set)
 import Data.Set qualified as S
 import Data.Set.Ordered (OSet)
 import Data.Set.Ordered qualified as OS
-import Data.List.NonEmpty (NonEmpty((:|)))
-import Data.List.NonEmpty qualified as NE
 import Data.Maybe (mapMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -355,32 +357,36 @@ genMultiComponentAST pm cm
     footer = Makefile [ blank ]
 
 genDepsAST :: HasCallStack => PackageMeta -> ComponentMeta -> CondBlock DepSet -> Makefile PlainAST
-genDepsAST pm cm bl
-  = genDepSetAST pm cm (bl ^. always) <>
-    genBranchesAST (bl ^. branches)
+genDepsAST pm cm bl =
+  genDepSetAST pm cm (bl ^. always) <>
+  genConditionalsAST (bl ^. conds)
   where
-    genBranchesAST :: HasCallStack => [CondBranch DepSet] -> Makefile PlainAST
-    genBranchesAST []       = mempty
-    genBranchesAST (br:brs)
-      = Makefile . (: []) . BDirective . DConditional $ genBranchesAST' (br :| brs)
+    genConditionalsAST :: HasCallStack => [Conditional DepSet] -> Makefile PlainAST
+    genConditionalsAST =
+      Makefile . ((BDirective . DConditional . genConditionalAST) <$>)
 
-    genBranchesAST' :: HasCallStack => NonEmpty (CondBranch DepSet) -> AST.Conditional PlainAST
-    genBranchesAST' (br :| brs)
-      = case brs of
-          []     -> clAST
-          (x:xs) -> clAST <> genBranchesAST' (x :| xs)
-      where
-        conAST :: HasCallStack => AST.Condition PlainAST
-        conAST = genConditionAST $ br ^. condition
+    genConditionalAST :: HasCallStack => Conditional DepSet -> AST.Conditional PlainAST
+    genConditionalAST cd =
+      AST.Conditional
+      { condExt      = True
+      , condBranches = case L.uncons (cd ^. branches) of
+                         Nothing ->
+                           error $ mconcat [ "Empty conditionals should have been "
+                                           , "deleted before translating into bmake AST: "
+                                           , show bl
+                                           ]
+                         Just (br, brs) ->
+                           genBranchAST br :| (genBranchAST <$> brs)
+      , condElse     = AST.Else () Nothing . genDepsAST pm cm <$> cd ^. condElse
+      , condEnd      = AST.EndIf () Nothing
+      }
 
-        clAST :: AST.Conditional PlainAST
-        clAST = AST.Conditional
-                { condExt      = True
-                , condBranches = (:| []) $
-                                 AST.CondBranch conAST (genDepsAST pm cm (br ^. ifTrue))
-                , condElse     = AST.Else () Nothing . genDepsAST pm cm <$> br ^. ifFalse
-                , condEnd      = AST.EndIf () Nothing
-                }
+    genBranchAST :: HasCallStack => CondBranch DepSet -> AST.CondBranch PlainAST
+    genBranchAST br =
+      let conAST  = genConditionAST (br ^. condition)
+          bodyAST = genDepsAST pm cm (br ^. condBlock)
+      in
+        AST.CondBranch conAST bodyAST
 
 genConditionAST :: HasCallStack => Condition -> AST.Condition PlainAST
 genConditionAST = flip (AST.If () . go) Nothing

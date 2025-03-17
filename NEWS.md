@@ -63,6 +63,9 @@ Bug fixes:
   but weren't optimal.
 * Fix an issue where `cabal2pkg` sometimes fails to simplify Makefile
   conditionals properly, leaving empty `.else` .. `.endif` blocks.
+* Fixed an issue where a series of Cabal conditionals that are independent
+  to each other could be wrongly translated to a single `.if` ... `.elif`
+  ... `.endif` as opposed to a series of `.if` ... `.endif`.
 
 ## 0.1.1 -- 2025-01-11
 

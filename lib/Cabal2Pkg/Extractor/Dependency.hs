@@ -10,6 +10,7 @@ import Cabal2Pkg.Extractor.Dependency.ExternalLib (ExtLibDep, extractExtLibDep)
 import Cabal2Pkg.Extractor.Dependency.Library (LibDep, extractLibDep)
 import Cabal2Pkg.Extractor.Dependency.PkgConfig (PkgConfDep, extractPkgConfDep)
 import Data.Data (Data)
+import Data.IsNull (IsNull(..))
 import Data.Set.Ordered (OSet, Bias(..), L)
 import Data.Set.Ordered qualified as OS
 import Distribution.Simple.BuildToolDepends qualified as BTD
@@ -57,6 +58,13 @@ instance Monoid DepSet where
            , _libDeps     = OS.empty
            , _pkgConfDeps = OS.empty
            }
+
+instance IsNull DepSet where
+  isNull ds =
+    OS.null (ds ^. exeDeps    ) &&
+    OS.null (ds ^. extLibDeps ) &&
+    OS.null (ds ^. libDeps    ) &&
+    OS.null (ds ^. pkgConfDeps)
 
 extractDeps :: C.PackageDescription -> C.BuildInfo -> Conc CLI DepSet
 extractDeps pkg bi

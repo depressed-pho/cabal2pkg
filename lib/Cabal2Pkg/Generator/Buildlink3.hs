@@ -7,9 +7,11 @@ import Cabal2Pkg.Extractor (PackageMeta(..))
 import Cabal2Pkg.Extractor.Component
   ( ComponentMeta, ComponentType(..), cDeps, cType )
 import Cabal2Pkg.Extractor.Conditional
-  ( CondBlock, CondBranch, always, branches, ifTrue, ifFalse )
+  ( CondBlock, Conditional, CondBranch
+  , always, conds, branches, condElse, condBlock )
 import Cabal2Pkg.Extractor.Dependency (DepSet(..), exeDeps)
 import Cabal2Pkg.Generator.Makefile (genComponentsAST)
+import Data.IsNull (isNull)
 import Data.List.NonEmpty (NonEmpty((:|)))
 import Data.Set.Ordered qualified as OS
 import Data.Text qualified as T
@@ -21,7 +23,7 @@ import Language.BMake.AST
   ( Makefile(..), Block(..), Directive(..), prettyPrintMakefile )
 import Language.BMake.AST qualified as AST
 import Language.BMake.AST.Plain ((#), (.+=), (.?=), (.:=), PlainAST, blank)
-import Lens.Micro.Platform ((^.), (.~), (%~), to)
+import Lens.Micro.Platform ((^.), (.~), (%~), to, traversed)
 
 
 genBuildlink3 :: HasCallStack => PackageMeta -> TL.Text
@@ -110,7 +112,7 @@ genAST pm =
     -- lists for Haskell library or foreign library components. Components
     -- having no runtime dependencies should also be omitted.
     comps' :: [ComponentMeta]
-    comps' = filter (^. (cDeps . to hasDeps))
+    comps' = filter (^. cDeps . to (not . isNull))
              . fmap (cDeps %~ filterRunDeps)
              . filter isLib
              . components $ pm
@@ -128,22 +130,16 @@ genAST pm =
              , "BUILDLINK_TREE" .+= ["-" <> pkgBase pm]
              ]
 
-hasDeps :: (Eq a, Monoid a) => CondBlock a -> Bool
-hasDeps bl
-  = bl ^. always . to (/= mempty) ||
-    bl ^. branches . to (any go)
-  where
-    go br
-      = br ^. ifTrue . to hasDeps ||
-        br ^. ifFalse . to (any hasDeps)
-
 -- THINKME: Maybe we should apply (floatBranches . garbageCollect) after
 -- this?
 filterRunDeps :: CondBlock DepSet -> CondBlock DepSet
 filterRunDeps
   = (always %~ exeDeps .~ OS.empty)
-  . (branches %~ (go <$>))
+  . (conds  %~ (go <$>))
   where
-    go :: CondBranch DepSet -> CondBranch DepSet
-    go = (ifTrue  %~ filterRunDeps)
-       . (ifFalse %~ (filterRunDeps <$>))
+    go :: Conditional DepSet -> Conditional DepSet
+    go = (branches . traversed %~ go')
+       . (condElse . traversed %~ filterRunDeps)
+
+    go' :: CondBranch DepSet -> CondBranch DepSet
+    go' = condBlock %~ filterRunDeps
