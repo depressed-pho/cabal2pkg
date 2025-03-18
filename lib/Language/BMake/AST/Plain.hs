@@ -435,14 +435,19 @@ pprAssignments as
         max n aligned
 
     pprNormally :: Bool
-    pprNormally = alignment < 32 || length as > 1
+    pprNormally =
+      alignment < 32 || length as > 1 || not (any isMulti as)
+
+    isMulti :: Assignment PlainAST -> Bool
+    isMulti Assignment {..} = length aValues > 1
 
 -- |A special case for singular assignments (i.e. ones that don't have
--- preceding or following assignments) whose variable name is very
--- long. Render them like this:
+-- preceding or following assignments) whose variable name is very long,
+-- and also having more than a single value to assign. Render them like
+-- this:
 --
--- > SOME_VERY_LONG_VARIABLE+=	\
--- > 	foo	\
+-- > SOME_VERY_LONG_VARIABLE+= \
+-- > 	foo \
 -- > 	bar
 --
 -- And not like this:
@@ -457,7 +462,7 @@ instance Pretty FoldedAssignment where
               , pretty () aOp
               , if null aValues && isNothing aComment
                 then PP.hardline
-                else mconcat [ tab
+                else mconcat [ PP.space
                              , PP.backslash
                              , PP.hardline
                              , go aValues
@@ -471,7 +476,7 @@ instance Pretty FoldedAssignment where
       go [x]    = tab <> pretty () x
       go (x:xs) = mconcat [ tab
                           , pretty () x
-                          , tab
+                          , PP.space
                           , PP.backslash
                           , PP.hardline
                           , go xs

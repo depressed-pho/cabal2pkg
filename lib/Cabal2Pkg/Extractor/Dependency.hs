@@ -1,7 +1,9 @@
+{-# LANGUAGE ApplicativeDo #-}
 {-# LANGUAGE TemplateHaskell #-}
 module Cabal2Pkg.Extractor.Dependency
   ( DepSet(..), isBuildable, exeDeps, extLibDeps, libDeps, pkgConfDeps
   , extractDeps
+  , extractSetupDeps
   ) where
 
 import Cabal2Pkg.CmdLine (CLI)
@@ -18,6 +20,7 @@ import Distribution.Types.BuildInfo qualified as C
 import Distribution.Types.Dependency qualified as C
 import Distribution.Types.PackageDescription qualified as C
 import Distribution.Types.PackageId qualified as C
+import Distribution.Types.SetupBuildInfo qualified as C
 import GHC.Generics (Generic)
 import UnliftIO.Async (Conc, conc)
 import Lens.Micro.Platform ((^.), makeLenses)
@@ -67,14 +70,14 @@ instance IsNull DepSet where
     OS.null (ds ^. pkgConfDeps)
 
 extractDeps :: C.PackageDescription -> C.BuildInfo -> Conc CLI DepSet
-extractDeps pkg bi
-  = DepSet (C.buildable bi) <$> execs <*> extLibs <*> libs <*> pkgConfLibs
+extractDeps pd bi =
+  DepSet (C.buildable bi) <$> execs <*> extLibs <*> libs <*> pkgConfLibs
   where
     execs :: Conc CLI (OSet ExeDep)
     execs = OS.fromList <$> traverse (conc . extractExeDep)
             [ dep
-            | dep <- BTD.getAllToolDependencies pkg bi
-            , not (BTD.isInternal pkg dep)
+            | dep <- BTD.getAllToolDependencies pd bi
+            , not (BTD.isInternal pd dep)
             ]
 
     extLibs :: Conc CLI (OSet ExtLibDep)
@@ -89,7 +92,19 @@ extractDeps pkg bi
       where
         -- It's an internal dependency if a package depends on itself.
         isInternalLib :: C.Dependency -> Bool
-        isInternalLib = (C.pkgName (C.package pkg) ==) . C.depPkgName
+        isInternalLib = (C.pkgName (C.package pd) ==) . C.depPkgName
 
     pkgConfLibs :: Conc CLI (OSet PkgConfDep)
     pkgConfLibs = pure . OS.fromList . (extractPkgConfDep <$>) $ C.pkgconfigDepends bi
+
+extractSetupDeps :: C.SetupBuildInfo -> Conc CLI DepSet
+extractSetupDeps sbi =
+  -- 'Conc' is not a monad. This is an ApplicativeDo.
+  do deps <- libs
+     pure $ DepSet True OS.empty OS.empty deps OS.empty
+  where
+    -- Custom setups can never depend on this very package because that
+    -- forms a cyclic dependency, which means we don't need to worry about
+    -- internal dependencies.
+    libs :: Conc CLI (OSet LibDep)
+    libs = OS.fromList <$> traverse (conc . extractLibDep) (C.setupDepends sbi)

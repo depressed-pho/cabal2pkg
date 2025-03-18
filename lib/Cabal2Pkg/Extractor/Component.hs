@@ -10,8 +10,9 @@ module Cabal2Pkg.Extractor.Component
 import Cabal2Pkg.CmdLine (CLI, FlagMap)
 import Cabal2Pkg.CmdLine qualified as CLI
 import Cabal2Pkg.Extractor.Conditional
-  ( Environment(..), CondBlock, always, extractCondBlock )
-import Cabal2Pkg.Extractor.Dependency (DepSet, isBuildable, extractDeps)
+  ( Environment(..), CondBlock(..), always, extractCondBlock )
+import Cabal2Pkg.Extractor.Dependency
+  ( DepSet, isBuildable, extractDeps, extractSetupDeps )
 import Control.Monad (when, unless)
 import Data.Data (Data)
 import Data.Foldable (toList)
@@ -32,11 +33,12 @@ import Distribution.Types.Library qualified as C
 import Distribution.Types.LibraryName qualified as C
 import Distribution.Types.PackageDescription qualified as C
 import Distribution.Types.PackageId qualified as C
+import Distribution.Types.SetupBuildInfo qualified as C
 import Distribution.Types.UnqualComponentName qualified as C
 import Lens.Micro.Platform ((^.), makeLenses)
 import Prettyprinter ((<+>), Doc)
 import Prettyprinter qualified as PP
-import UnliftIO.Async (Conc)
+import UnliftIO.Async (Conc, runConc)
 
 
 data ComponentMeta = ComponentMeta
@@ -46,10 +48,14 @@ data ComponentMeta = ComponentMeta
   }
   deriving (Data, Eq, Show)
 
-data ComponentType
-  = Library
+data ComponentType =
+    -- |@custom-setup@ is technically not a component in Cabal's sense, but
+    -- we treat it as such.
+    CustomSetup
+  | Library
   | ForeignLib
   | Executable
+
   deriving (Data, Eq, Show)
 
 makeLenses ''ComponentMeta
@@ -58,12 +64,14 @@ makeLenses ''ComponentMeta
 extractComponents :: GenericPackageDescription -> CLI [ComponentMeta]
 extractComponents gpd
   = do env     <- extractEnv
+       cSetup  <- traverse  extractCSetup            (C.setupBuildInfo      pd)
        lib     <- traverse (extractLib    env      ) (GPD.condLibrary      gpd)
        subLibs <- traverse (extractLib    env . snd) (GPD.condSubLibraries gpd)
        frnLibs <- traverse (extractFrnLib env . snd) (GPD.condForeignLibs  gpd)
        execs   <- traverse (extractExe    env . snd) (GPD.condExecutables  gpd)
        pure . garbageCollect . mconcat $
-         [ maybeToList lib
+         [ maybeToList cSetup
+         , maybeToList lib
          , subLibs
          , frnLibs
          , execs
@@ -89,6 +97,18 @@ extractComponents gpd
 
     pd :: C.PackageDescription
     pd = GPD.packageDescription gpd
+
+    -- The custom-setup stanza does not support conditionals at all, which
+    -- means we must do something special for that. See
+    -- https://github.com/haskell/cabal/issues/4286
+    extractCSetup :: C.SetupBuildInfo -> CLI ComponentMeta
+    extractCSetup sbi =
+      do deps <- runConc . extractSetupDeps $ sbi
+         pure $ ComponentMeta
+           { _cType = CustomSetup
+           , _cName = "custom-setup"
+           , _cDeps = CondBlock deps mempty
+           }
 
     extractLib :: Environment -> C.CondTree C.ConfVar c C.Library -> CLI ComponentMeta
     extractLib = extractCondBlock extractContent extractOuter

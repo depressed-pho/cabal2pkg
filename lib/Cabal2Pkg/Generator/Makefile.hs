@@ -6,7 +6,8 @@ module Cabal2Pkg.Generator.Makefile
   , genComponentsAST
   ) where
 
-import Cabal2Pkg.Extractor (PackageMeta(..))
+import Cabal2Pkg.Extractor (PackageMeta)
+import Cabal2Pkg.Extractor qualified as PM
 import Cabal2Pkg.Extractor.Component (ComponentMeta, ComponentType(..), cType, cName, cDeps)
 import Cabal2Pkg.Extractor.Conditional
   ( CondBlock, Conditional, CondBranch, Condition(..)
@@ -53,6 +54,9 @@ import Network.URI (uriToString)
 import Network.URI.Lens (uriPathLens)
 import System.FilePath.Posix qualified as FP
 
+data DepMethod = Build | Full
+  deriving (Eq, Show)
+
 
 genMakefile :: HasCallStack => PackageMeta -> TL.Text
 genMakefile = prettyPrintMakefile . genAST
@@ -87,30 +91,30 @@ genAST pm
              -- point would cause a major breakage. So we need to
              -- explicitly define it here whenever pkgBase isn't equal to
              -- hs-{distBase}.
-             <> ( if pkgBase pm == "hs-" <> distBase' then
+             <> ( if PM.pkgBase pm == "hs-" <> distBase' then
                     mempty
                   else
                     let pkgName
-                          | pkgBase pm == CI.foldCase distBase' =
+                          | PM.pkgBase pm == CI.foldCase distBase' =
                               "${DISTNAME:tl}"
                           | otherwise =
                               "hs-${DISTNAME:tl}"
                     in
                       [ "PKGNAME" .= pure pkgName ]
                 )
-             <> case categories pm of
+             <> case PM.categories pm of
                   []   -> [ "CATEGORIES" .= mempty # "TODO" ]
                   cats -> [ "CATEGORIES" .= cats ]
              <> genMasterSites pm
              <> [ blank ]
-             <> case owner pm of
+             <> case PM.owner pm of
                   Just o  -> [ "OWNER" .= pure o ]
                   Nothing ->
-                    case maintainer pm of
+                    case PM.maintainer pm of
                       Just m  -> [ "MAINTAINER" .= pure m ]
                       Nothing -> mempty
-             <> case homepage pm of
-                  _ | isFromHackage (origin pm) ->
+             <> case PM.homepage pm of
+                  _ | isFromHackage (PM.origin pm) ->
                         -- mk/haskell.mk has a good default for packages
                         -- coming from Hackage.
                         []
@@ -118,26 +122,26 @@ genAST pm
                         [ "HOMEPAGE" .= mempty # "TODO" ]
                     | otherwise ->
                         [ "HOMEPAGE" .= pure h ]
-             <> case comment pm of
+             <> case PM.comment pm of
                   c | T.null c ->
                         [ "COMMENT" .= mempty # "TODO: Short description of the package" ]
                     | otherwise ->
-                        [ "COMMENT" .= pure (comment pm) ]
-             <> [ case T.uncons (license pm) of
+                        [ "COMMENT" .= pure (PM.comment pm) ]
+             <> [ case T.uncons (PM.license pm) of
                     Just ('#', l') ->
                       "LICENSE" .= [] # T.strip l'
                     _ ->
-                      "LICENSE" .= pure (license pm)
+                      "LICENSE" .= pure (PM.license pm)
                 , blank
                 ]
 
     distBase' :: Text
-    distBase' = T.pack . prettyShow . distBase $ pm
+    distBase' = T.pack . prettyShow . PM.distBase $ pm
 
     distName :: Text
     distName = mconcat [ distBase'
                        , "-"
-                       , T.pack . prettyShow . distVersion $ pm
+                       , T.pack . prettyShow . PM.distVersion $ pm
                        ]
 
     toolsAndConfigArgs :: Makefile PlainAST
@@ -210,7 +214,7 @@ genAST pm
     -- FIXME: What if we had pkg-config deps in other cases?
     useTools :: Makefile PlainAST
     useTools
-      = case components pm of
+      = case PM.components pm of
           [c] ->
             let exeDeps'      = addPkgConf $ c ^. cDeps . always . exeDeps . to toList
                 addPkgConf xs
@@ -233,12 +237,12 @@ genAST pm
 
     configArgs :: Makefile PlainAST
     configArgs
-      | M.null (flags pm) = mempty
+      | M.null (PM.flags pm) = mempty
       | otherwise
           = Makefile [ "CONFIGURE_ARGS" .+= flags' ]
       where
         flags' :: [Text]
-        flags' = go <$> M.toList (flags pm)
+        flags' = go <$> M.toList (PM.flags pm)
 
         go :: (FlagName, Bool) -> Text
         go (flag, True ) = "-f +" <> f2t flag
@@ -251,7 +255,7 @@ genAST pm
     -- dependencies because we move them just below the header.
     comps' :: [ComponentMeta]
     comps'
-      = case components pm of
+      = case PM.components pm of
           [c] ->
             let c' = c & cDeps . always . exeDeps .~ OS.empty
             in
@@ -267,7 +271,7 @@ genAST pm
 
 genMasterSites :: HasCallStack => PackageMeta -> [Block PlainAST]
 genMasterSites pm =
-  case origin pm of
+  case PM.origin pm of
     HTTP httpURI ->
       let httpURI' = httpURI & uriPathLens %~ FP.dropFileName
       in
@@ -277,10 +281,10 @@ genMasterSites pm =
       [ "MASTER_SITES" .= [] # "empty" ]
 
     GitHub dist ->
-      genGitHubMasterSites (pkgBase pm) (distVersion pm) dist
+      genGitHubMasterSites (PM.pkgBase pm) (PM.distVersion pm) dist
 
     GitLab dist ->
-      genGitLabMasterSites (pkgBase pm) (distVersion pm) dist
+      genGitLabMasterSites (PM.pkgBase pm) (PM.distVersion pm) dist
 
     Hackage {} ->
       [] -- mk/haskell.mk takes care of this.
@@ -309,6 +313,8 @@ gcComponents = filter p
     nonNull :: GenericQ Bool
     nonNull = mkQ False (not . nullDS)
 
+    -- THINKME: What about conditionals that become empty after this
+    -- cleanup? See also filterRunDeps in Cabal2Pkg.Generator.Buildlink3.
     nullDS :: DepSet -> Bool
     nullDS ds =
       and @[] [ ds ^. exeDeps     . to omitBundledExe . to OS.null
@@ -345,13 +351,15 @@ genMultiComponentAST pm cm
             ]
   where
     header :: Makefile PlainAST
-    header
-      = let ty = case cm ^. cType of
-                   Library    -> "lib"
-                   ForeignLib -> "flib"
-                   Executable -> "exe"
-        in
-          Makefile [ blank # ty <> ":" <> cm ^. cName ]
+    header =
+      let f  = (<> ":" <> cm ^. cName)
+          hd = case cm ^. cType of
+                 CustomSetup -> "custom-setup"
+                 Library     -> f "lib"
+                 ForeignLib  -> f "flib"
+                 Executable  -> f "exe"
+      in
+        Makefile [ blank # hd ]
 
     footer :: Makefile PlainAST
     footer = Makefile [ blank ]
@@ -434,12 +442,16 @@ flattenAnd = AST.And () . NE.fromList . foldr go []
           AST.Expr _ _   -> e : es
 
 genDepSetAST :: PackageMeta -> ComponentMeta -> DepSet -> Makefile PlainAST
-genDepSetAST pm cm ds
-  = mconcat [ genExeDepsAST $ ds ^. exeDeps . to toList
-            , mconcat $ genExtLibDepAST    <$> ds ^. extLibDeps  . to toList
-            , mconcat $ genLibDepAST pm cm <$> ds ^. libDeps     . to toList
-            , mconcat $ genPkgConfDepAST   <$> ds ^. pkgConfDeps . to toList
-            ]
+genDepSetAST pm cm ds =
+  mconcat [ genExeDepsAST $ ds ^. exeDeps . to toList
+          , mconcat $ genExtLibDepAST    meth <$> ds ^. extLibDeps  . to toList
+          , mconcat $ genLibDepAST pm cm meth <$> ds ^. libDeps     . to toList
+          , mconcat $ genPkgConfDepAST   meth <$> ds ^. pkgConfDeps . to toList
+          ]
+  where
+    meth :: DepMethod
+    meth | CustomSetup <- cm ^. cType = Build
+         | otherwise                  = Full
 
 genExeDepsAST :: [ExeDep] -> Makefile PlainAST
 genExeDepsAST es
@@ -467,12 +479,18 @@ genExeDepsAST es
           [x] -> bl # "TODO: unknown tool: " <> x
           xs  -> bl # "TODO: unknown tools: " <> T.intercalate ", " xs
 
-genExtLibDepAST :: ExtLibDep -> Makefile PlainAST
-genExtLibDepAST (ExtLibDep name)
-  = Makefile [ blank # "TODO: Include buildlink3.mk for " <> name ]
+genExtLibDepAST :: DepMethod -> ExtLibDep -> Makefile PlainAST
+genExtLibDepAST meth (ExtLibDep name) =
+  meth' <> Makefile [ blank # "TODO: Include buildlink3.mk for " <> name ]
+  where
+    meth' :: Makefile PlainAST
+    meth' = case meth of
+              Full  -> mempty
+              Build ->
+                Makefile [ blank # "TODO: Set BUILDLINK_DEPMETHOD for " <> name <> " to \"build\"" ]
 
-genLibDepAST :: PackageMeta -> ComponentMeta -> LibDep -> Makefile PlainAST
-genLibDepAST pm cm libDep =
+genLibDepAST :: PackageMeta -> ComponentMeta -> DepMethod -> LibDep -> Makefile PlainAST
+genLibDepAST pm cm meth libDep =
   case libDep of
     KnownBundledLib {  } -> mempty
     KnownPkgsrcLib  {..}
@@ -482,20 +500,34 @@ genLibDepAST pm cm libDep =
           -- optparse-applicative. Most of the time, if not always, their
           -- command-line interface is built on top of optparse-applicative
           -- and thus support generating shell completion scripts.
-          let exeDecl = if cm ^. cName == pkgBase pm then
+          let exeDecl = if cm ^. cName == PM.pkgBase pm then
                           mempty
                         else
                           Makefile [ "OPTPARSE_APPLICATIVE_EXECUTABLES" .+= [cm ^. cName] ]
-          in
-            exeDecl <> Makefile [ include $ "../../" <> pkgPath <> "/application.mk" ]
+          in exeDecl <> Makefile [ include $ "../../" <> pkgPath <> "/application.mk" ]
       | otherwise ->
-          Makefile [ include $ "../../" <> pkgPath <> "/buildlink3.mk" ]
+          let meth' = case meth of
+                        Full  -> mempty
+                        Build ->
+                          Makefile [ AST.Value () ("BUILDLINK_DEPMETHOD." <> pkgBase) .= ["build"] ]
+          in meth' <> Makefile [ include $ "../../" <> pkgPath <> "/buildlink3.mk" ]
     UnknownLib {..} ->
-      Makefile [ blank # mconcat [ "TODO: Package \""
-                                 , T.pack . prettyShow $ name
-                                 , "\" and include its buildlink3.mk"
-                                 ] ]
+      let name' = T.pack . prettyShow $ name
+          meth' = case meth of
+                    Full  -> mempty
+                    Build ->
+                      Makefile [ blank # "TODO: Set BUILDLINK_DEPMETHOD for " <> name' <> " to \"build\"" ]
+      in meth' <> Makefile [ blank # mconcat [ "TODO: Package \""
+                                             , name'
+                                             , "\" and include its buildlink3.mk"
+                                             ] ]
 
-genPkgConfDepAST :: PkgConfDep -> Makefile PlainAST
-genPkgConfDepAST (PkgConfDep name)
-  = Makefile [ blank # "TODO: Include buildlink3.mk for " <> name ]
+genPkgConfDepAST :: DepMethod -> PkgConfDep -> Makefile PlainAST
+genPkgConfDepAST meth (PkgConfDep name) =
+  meth' <> Makefile [ blank # "TODO: Include buildlink3.mk for " <> name ]
+  where
+    meth' :: Makefile PlainAST
+    meth' = case meth of
+              Full  -> mempty
+              Build ->
+                Makefile [ blank # "TODO: Set BUILDLINK_DEPMETHOD for " <> name <> " to \"build\"" ]

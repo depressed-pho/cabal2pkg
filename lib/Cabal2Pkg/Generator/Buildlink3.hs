@@ -25,7 +25,6 @@ import Language.BMake.AST qualified as AST
 import Language.BMake.AST.Plain ((#), (.+=), (.?=), (.:=), PlainAST, blank)
 import Lens.Micro.Platform ((^.), (.~), (%~), to, traversed)
 
-
 genBuildlink3 :: HasCallStack => PackageMeta -> TL.Text
 genBuildlink3 = prettyPrintMakefile . genAST
 
@@ -120,9 +119,10 @@ genAST pm =
         isLib :: ComponentMeta -> Bool
         isLib cm
           = case cm ^. cType of
-              Library    -> True
-              ForeignLib -> True
-              Executable -> False
+              CustomSetup -> False
+              Library     -> True
+              ForeignLib  -> True
+              Executable  -> False
 
     footer :: Makefile PlainAST
     footer = Makefile

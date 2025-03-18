@@ -45,6 +45,8 @@ data LibDep
       name :: !PackageName
       -- |The PKGPATH, such as @"math/hs-semigroupoids"@.
     , pkgPath :: !Text
+      -- |The PKGBASE, such as @"hs-semigroupoids"@.
+    , pkgBase :: !Text
       -- |The version of the library it found.
     , version :: !Version
       -- |The range of versions that is acceptable.
@@ -112,8 +114,8 @@ extractLibDep dep
          Nothing  ->
            do m <- findPkgsrcPkg (C.depPkgName dep)
               case m of
-                Just (path, ver) -> pure $ found path ver
-                Nothing          -> pure notFound
+                Just (path, base, ver) -> pure $ found path base ver
+                Nothing                -> pure notFound
   where
     bundled :: Version -> LibDep
     bundled ver =
@@ -123,11 +125,12 @@ extractLibDep dep
       , verRange = C.depVerRange dep
       }
 
-    found :: Text -> Version -> LibDep
-    found path ver =
+    found :: Text -> Text -> Version -> LibDep
+    found path base ver =
       KnownPkgsrcLib
       { name     = C.depPkgName dep
       , pkgPath  = path
+      , pkgBase  = base
       , version  = ver
       , verRange = C.depVerRange dep
       }
@@ -158,9 +161,9 @@ lookupBundled ipi name
 
 -- |Search for a pkgsrc package case-insensitively, both with and without
 -- the @hs-@ prefix. Only packages that include @mk/haskell.mk@ are
--- returned. The function returns a pair of its @PKGPATH@ and
+-- returned. The function returns a tuple of its @PKGPATH@, @PKGBASE@, and
 -- @PKGVERSION_NOREV@.
-findPkgsrcPkg :: C.PackageName -> CLI (Maybe (Text, Version))
+findPkgsrcPkg :: C.PackageName -> CLI (Maybe (Text, Text, Version))
 findPkgsrcPkg name
   = do db <- srcDb
        -- Would it be beneficial to perform these two searches
@@ -175,13 +178,14 @@ findPkgsrcPkg name
            do p1 <- SrcDb.findPackageByNameCI db name'
               join <$> traverse found p1
   where
-    found :: Package CLI -> CLI (Maybe (Text, Version))
+    found :: Package CLI -> CLI (Maybe (Text, Text, Version))
     found pkg =
       do hask <- SrcDb.includesHaskellMk pkg
          if hask
            then do ver  <- toCabalVer =<< SrcDb.pkgVersionNoRev pkg
                    path <- T.pack <$> OP.decodeUtf (SrcDb.pkgPath pkg)
-                   pure $ Just (path, ver)
+                   base <- SrcDb.pkgBase pkg
+                   pure $ Just (path, base, ver)
            else pure Nothing
 
     toCabalVer :: MonadFail m => Text -> m Version

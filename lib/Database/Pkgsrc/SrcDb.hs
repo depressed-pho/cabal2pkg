@@ -28,6 +28,7 @@ module Database.Pkgsrc.SrcDb
   , distName
   , distSubDir
   , pkgName
+  , pkgBase
   , pkgVersionNoRev
   , pkgRevision
   , masterSites
@@ -109,6 +110,7 @@ data Package m
     , pDISTNAME          :: Deferred m PosixString
     , pDIST_SUBDIR       :: Deferred m (Maybe PosixPath)
     , pPKGNAME           :: Deferred m Text
+    , pPKGBASE           :: Deferred m Text
     , pPKGVERSION_NOREV  :: Deferred m Text
     , pPKGREVISION       :: Deferred m (Maybe Int)
     , pMASTER_SITES      :: Deferred m [URI]
@@ -369,6 +371,7 @@ scanPkgs makePath root catName =
                            [ "DISTNAME"
                            , "DIST_SUBDIR"
                            , "PKGNAME"
+                           , "PKGBASE"
                            , "PKGVERSION_NOREV"
                            , "PKGREVISION"
                            , "MASTER_SITES"
@@ -391,6 +394,7 @@ scanPkgs makePath root catName =
            , pDISTNAME          = get "DISTNAME"         posixStr            <$> vars
            , pDIST_SUBDIR       = get "DIST_SUBDIR"      (optional posixStr) <$> vars
            , pPKGNAME           = get "PKGNAME"          text                <$> vars
+           , pPKGBASE           = get "PKGBASE"          text                <$> vars
            , pPKGVERSION_NOREV  = get "PKGVERSION_NOREV" text                <$> vars
            , pPKGREVISION       = get "PKGREVISION"      (optional int)      <$> vars
            , pMASTER_SITES      = get "MASTER_SITES"     (many absURI)       <$> vars
@@ -521,6 +525,9 @@ distSubDir = force . pDIST_SUBDIR
 
 pkgName :: MonadUnliftIO m => Package m -> m Text
 pkgName = force . pPKGNAME
+
+pkgBase :: MonadUnliftIO m => Package m -> m Text
+pkgBase = force . pPKGBASE
 
 pkgVersionNoRev :: MonadUnliftIO m => Package m -> m Text
 pkgVersionNoRev = force . pPKGVERSION_NOREV

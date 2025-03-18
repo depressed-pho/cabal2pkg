@@ -36,6 +36,12 @@ Behaviour changes:
   even when the package is already the latest one.
 * Newlines in `COMMENT` are now replaced with spaces.
 * `cabal2pkg` now displays warnings about unknown dependencies.
+* `cabal2pkg` now treats `custom-setup` as a Cabal package component,
+  although it is technically not. Setup dependencies were previously
+  ignored but are now build-dependend. (Yes, they are build-depended, not
+  tool-depended because buildlink `BUILDLINK_DEPMETHOD` doesn't support
+  tool dependencies. They have to be buildlinked, otherwise `Setup` cannot
+  be linked.)
 
 Bug fixes:
 
