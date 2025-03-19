@@ -72,6 +72,8 @@ Bug fixes:
 * Fixed an issue where a series of Cabal conditionals that are independent
   to each other could be wrongly translated to a single `.if` ... `.elif`
   ... `.endif` as opposed to a series of `.if` ... `.endif`.
+* Fixed an issue where `USE_TOOLS+= pkg-config` would not be produced in
+  certain cases even when there were pkg-config dependencies.
 
 ## 0.1.1 -- 2025-01-11
 

@@ -208,32 +208,48 @@ genAST pm
         needsPrefs' (And   _ _) = False
         needsPrefs' (Expr  _ b) = b
 
-    -- The top-level USE_TOOLS. This exists only when we have just one
-    -- component and at least one unconditional pkg-config dependency or an
-    -- unconditional tool dependency.
-    -- FIXME: What if we had pkg-config deps in other cases?
+    -- The top-level USE_TOOLS. This exists only when (A) we have just one
+    -- component and it has at least one unconditional tool dependency, or
+    -- (B) we have at least one pkg-config dependency somewhere in the
+    -- conditional tree.
     useTools :: Makefile PlainAST
     useTools
-      = case PM.components pm of
-          [c] ->
-            let exeDeps'      = addPkgConf $ c ^. cDeps . always . exeDeps . to toList
-                addPkgConf xs
-                  | c ^. cDeps . always . pkgConfDeps . to (not . null) =
-                      -- We have an unconditional dependency on a
-                      -- pkg-config package. Add it to USE_TOOLS.
-                      let pkgConf = KnownPkgsrcExe
-                                    { name     = "pkg-config"
-                                    , pkgPath  = mempty
-                                    , version  = C.nullVersion
-                                    , verRange = C.anyVersion
-                                    }
-                      in
-                        pkgConf : xs
-                  | otherwise
-                      = xs
-            in
-              genExeDepsAST exeDeps'
-          _ -> mempty
+      | [c] <- gcComponents . PM.components $ pm =
+          let exeDeps'      = addPkgConf $ c ^. cDeps . always . exeDeps . to toList
+              addPkgConf xs
+                | havePkgConfDeps =
+                    -- We have an unconditional dependency on a pkg-config
+                    -- package. Add it to USE_TOOLS.
+                    let pkgConf = KnownPkgsrcExe
+                                  { name     = "pkg-config"
+                                  , pkgPath  = mempty
+                                  , version  = C.nullVersion
+                                  , verRange = C.anyVersion
+                                  }
+                    in
+                      pkgConf : xs
+                | otherwise =
+                    xs
+          in genExeDepsAST exeDeps'
+      | havePkgConfDeps =
+          genExeDepsAST [ KnownPkgsrcExe
+                          { name     = "pkg-config"
+                          , pkgPath  = mempty
+                          , version  = C.nullVersion
+                          , verRange = C.anyVersion
+                          }
+                        ]
+      | otherwise =
+          mempty
+
+    havePkgConfDeps :: Bool
+    havePkgConfDeps = anywhere q pm
+      where
+        q :: GenericQ Bool
+        q = mkQ False q'
+
+        q' :: DepSet -> Bool
+        q' = (^. pkgConfDeps . to (not . null))
 
     configArgs :: Makefile PlainAST
     configArgs
@@ -254,14 +270,14 @@ genAST pm
     -- If we only have a single component, remove unconditional tool
     -- dependencies because we move them just below the header.
     comps' :: [ComponentMeta]
-    comps'
-      = case PM.components pm of
-          [c] ->
-            let c' = c & cDeps . always . exeDeps .~ OS.empty
-            in
-              [c']
-          cs ->
-            cs
+    comps' =
+      case gcComponents . PM.components $ pm of
+        [c] ->
+          let c' = c & cDeps . always . exeDeps .~ OS.empty
+          in
+            [c']
+        cs ->
+          cs
 
     footer :: Makefile PlainAST
     footer = Makefile
@@ -298,9 +314,8 @@ genMasterSites pm =
 -- > .include "../../devel/hs-baz/buildlink3.mk"
 genComponentsAST :: HasCallStack => PackageMeta -> [ComponentMeta] -> Makefile PlainAST
 genComponentsAST pm comps
-  = case gcComponents comps of
-      [cm]   -> genSingleComponentAST pm cm
-      comps' -> mconcat $ genMultiComponentAST pm <$> comps'
+  | [cm] <- comps = genSingleComponentAST pm cm
+  | otherwise     = mconcat $ genMultiComponentAST pm <$> comps
 
 -- |Omit components that have no visible dependencies, i.e. pkgsrc
 -- dependencies, not compiler-bundled ones.
