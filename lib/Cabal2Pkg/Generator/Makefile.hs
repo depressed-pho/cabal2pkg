@@ -481,7 +481,7 @@ genExeDepsAST es
 
 genExtLibDepAST :: DepMethod -> ExtLibDep -> Makefile PlainAST
 genExtLibDepAST meth (ExtLibDep name) =
-  meth' <> Makefile [ blank # "TODO: Include buildlink3.mk for " <> name ]
+  meth' <> Makefile [ blank # "TODO: Include buildlink3.mk for package providing library " <> name ]
   where
     meth' :: Makefile PlainAST
     meth' = case meth of
@@ -494,8 +494,13 @@ genLibDepAST pm cm meth libDep =
   case libDep of
     KnownBundledLib {  } -> mempty
     KnownPkgsrcLib  {..}
-      | cm ^. cType == Executable &&
-        pkgPath == "devel/hs-optparse-applicative" ->
+      | cm ^. cType == CustomSetup && pkgBase == "gtk2hs-buildtools" ->
+          -- A special case for custom-setup depending on
+          -- gtk2hs-buildtools. The tool is not a library but is an
+          -- executable, so the correct way to depend on it is to add it to
+          -- USE_TOOLS.
+          Makefile [ "USE_TOOLS" .+= [pkgBase] ]
+      | cm ^. cType == Executable && pkgBase == "hs-optparse-applicative" ->
           -- A special case for executables depending on
           -- optparse-applicative. Most of the time, if not always, their
           -- command-line interface is built on top of optparse-applicative
@@ -524,7 +529,7 @@ genLibDepAST pm cm meth libDep =
 
 genPkgConfDepAST :: DepMethod -> PkgConfDep -> Makefile PlainAST
 genPkgConfDepAST meth (PkgConfDep name) =
-  meth' <> Makefile [ blank # "TODO: Include buildlink3.mk for " <> name ]
+  meth' <> Makefile [ blank # "TODO: Include buildlink3.mk for package providing pkg-config " <> name ]
   where
     meth' :: Makefile PlainAST
     meth' = case meth of
