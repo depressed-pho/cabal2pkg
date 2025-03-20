@@ -1,7 +1,71 @@
 # -*- org -*-
 
-* DONE [#A] =cabal update= should try to extract ChangeLog entries
+* DONE [#A] =cabal2pkg update= should try to extract ChangeLog entries
 * DONE [#A] Automate generating README.md; it is currently done manually
 * DONE [#A] =HASKELL_UNRESTRICT_DEPENDENCIES= should only be generated to allow newer deps but not older ones
 * DONE [#B] Allow wip packages to update
 * DONE [#C] Can we somehow filter out duplicate dependencies listed in the same component? (pandoc-lua-marshal-0.3.0)
+* TODO [#C] =cabal2pkg update=: Fall back to an older version if the latest one depends on a newer GHC
+This feature is really nice to have, but it doesn't work out in the general
+case. Consider the following scenario:
+- Package foo-1.1 (the latest) depends on a newer GHC than what currently
+  we have, so we fall back to foo-1.0.
+- Package bar-2.1 (the latest) does not directly depend on a newer GHC, but
+  does depend on foo-1.1.
+In this case bar-2.1 is unusable too and must be fallen back. But how?
+* TODO [#C] Better support for packages whose set of dependencies can only be determined with a SAT solver
+This is a very hard problem. Some packages out there do something like
+this:
+
+#+BEGIN_SRC haskell-cabal
+  flag use-old-foo
+    manual: False
+    default: False
+
+  library
+    if flag(use-old-foo)
+      build-depends:
+        foo >= 1.0 && < 2.0
+    else
+      build-depends:
+        foo          >= 2.0,
+        supplemental >= 3.1
+#+END_SRC
+
+=cabal2pkg= currently warns about =foo= being too old, and that
+=supplemental= cannot be found in pkgsrc.
+
+[[https://hackage.haskell.org/package/cabal-install][cabal-install]] solves dependencies like this by first trying to use the
+default value for =use-old-foo= (which is =False=). And if that's
+unsatisfiable, it tries negating =use-old-foo=. It uses
+[[https://hackage.haskell.org/package/cabal-install-solver][cabal-install-solver]] to perform a SAT solving.
+
+But suppose =foo= comes from GHC itself, and the version we currently have
+is =foo-1.5=. Also suppose we don't have =supplemental= in pkgsrc. In this
+case we must do exactly the same thing as =cabal-install= and conclude that
+it has to be solved by setting =use-old-foo= to =True=. Can we do that? In
+this specific case, yes. It's definitely not easy at all though.
+
+#+BEGIN_SRC haskell-cabal
+  flag use-old-foo
+    manual: False
+    default: False
+
+  library
+    if os(linux)
+      build-depends:
+        foo >= 1.0
+    else
+      if flag(use-old-foo)
+        build-depends:
+          foo >= 1.0 && < 2.0
+      else
+        build-depends:
+          foo          >= 2.0,
+          supplemental >= 3.1
+#+END_SRC
+
+But then what about this? =cabal-install= can solve this no problem because
+it only needs to consider the current platform. In pkgsrc we cannot do
+that. Our =foo-1.5= is fine for Linux but isn't for anything else. I really
+don't know what to do about this.
