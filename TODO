@@ -13,6 +13,7 @@ case. Consider the following scenario:
 - Package bar-2.1 (the latest) does not directly depend on a newer GHC, but
   does depend on foo-1.1.
 In this case bar-2.1 is unusable too and must be fallen back. But how?
+
 * TODO [#C] Better support for packages whose set of dependencies can only be determined with a SAT solver
 This is a very hard problem. Some packages out there do something like
 this:
@@ -69,3 +70,24 @@ But then what about this? =cabal-install= can solve this no problem because
 it only needs to consider the current platform. In pkgsrc we cannot do
 that. Our =foo-1.5= is fine for Linux but isn't for anything else. I really
 don't know what to do about this.
+
+* TODO [#C] Add support for configuration files
+This is currently not possible because optparse-applicative can only read
+options from command line (or really, a list of
+=String=). [[https://hackage.haskell.org/package/configuration-tools][configuration-tools]] is promising but it's not feature-complete
+for cabal2pkg.
+
+* TODO [#C] Spawn a background process that maintains a local copy of Hackage database
+=cabal2pkg currently= performs an HTTP request to Hackage each time it
+needs to query the database. This is not very efficient, especially when
+there a lot of packages to update.
+
+Ideally we should spawn a background process when we need to query the
+database. The background process should:
+- Maintain a local copy of Hackage DB using [[https://hackage.haskell.org/package/hackage-security][hackage-security]].
+- Listen to requests (via a UNIX domain socket) from the main process,
+  perhaps using [[https://hackage.haskell.org/package/proto-lens][proto-lens]] and [[https://hackage.haskell.org/package/proto-lens-protoc][proto-lens-protoc]].
+- Shutdown when it's idle for like 10 minutes.
+- Check for updates each time a query is performed.
+- Query the HTTP API when the local copy is not ready, because downloading
+  the copy takes time.
