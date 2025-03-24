@@ -88,6 +88,16 @@ database. The background process should:
 - Listen to requests (via a UNIX domain socket) from the main process,
   perhaps using [[https://hackage.haskell.org/package/proto-lens][proto-lens]] and [[https://hackage.haskell.org/package/proto-lens-protoc][proto-lens-protoc]].
 - Shutdown when it's idle for like 10 minutes.
-- Check for updates each time a query is performed.
+- Check for updates each time a query is performed, but only after like 15
+  minutes the last time it checked.
 - Query the HTTP API when the local copy is not ready, because downloading
   the copy takes time.
+
+* TODO [#C] Implement a batch =check= mode
+Like =update= but doesn't actually update anything. It exits with 0 when
+there is a newer package on Hackage, and 75 (=EX_TEMPFAIL= from
+=sysexits(3)=) when it's already the latest. The intended use of this mode
+is to perform a pkgsrc-wide scanning with the help of some shell script.
+
+Don't do this before implementing the background process, because otherwise
+users would overload Hackage.
