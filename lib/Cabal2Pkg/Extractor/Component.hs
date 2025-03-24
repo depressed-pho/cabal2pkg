@@ -13,6 +13,7 @@ import Cabal2Pkg.Extractor.Conditional
   ( Environment(..), CondBlock(..), always, extractCondBlock )
 import Cabal2Pkg.Extractor.Dependency
   ( DepSet, isBuildable, extractDeps, extractSetupDeps )
+import Cabal2Pkg.Extractor.Haddock (extractHaddock)
 import Control.Monad (when, unless)
 import Data.Data (Data)
 import Data.Foldable (toList)
@@ -38,6 +39,7 @@ import Distribution.Types.UnqualComponentName qualified as C
 import Lens.Micro.Platform ((^.), makeLenses)
 import Prettyprinter ((<+>), Doc)
 import Prettyprinter qualified as PP
+import Prettyprinter.Render.Terminal (AnsiStyle)
 import UnliftIO.Async (Conc, runConc)
 
 
@@ -154,7 +156,8 @@ extractComponents gpd
           , _cDeps = deps
           }
 
-
+-- |Extract package flags, manual or not, and combine them with what are
+-- given via command-line options.
 extractFlags :: FlagMap -> [C.PackageFlag] -> CLI FlagMap
 extractFlags givenFlags flags =
   do let (defaulted, flags') = foldl' go (mempty, mempty) flags
@@ -185,11 +188,11 @@ extractFlags givenFlags flags =
                      )
      pure flags'
   where
-    pprPF :: C.PackageFlag -> Doc ann
+    pprPF :: C.PackageFlag -> Doc AnsiStyle
     pprPF pf =
       PP.nest 2 . PP.vsep $
       [ (PP.pretty . C.unFlagName . C.flagName $ pf) <> PP.colon
-      , (PP.pretty . C.flagDescription $ pf) <+>
+      , (extractHaddock . T.pack . C.flagDescription $ pf) <+>
         PP.parens ("default:" <+> PP.pretty (C.flagDefault pf))
       ]
 

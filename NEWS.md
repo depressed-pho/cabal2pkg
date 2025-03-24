@@ -42,6 +42,8 @@ Behaviour changes:
   tool-depended because buildlink `BUILDLINK_DEPMETHOD` doesn't support
   tool dependencies. They have to be buildlinked, otherwise `Setup` cannot
   be linked.)
+* Description of Manual Cabal flags are now parsed and rendered as a
+  Haddock text on terminal.
 
 Bug fixes:
 
@@ -74,6 +76,8 @@ Bug fixes:
   ... `.endif` as opposed to a series of `.if` ... `.endif`.
 * Fixed an issue where `USE_TOOLS+= pkg-config` would not be produced in
   certain cases even when there were pkg-config dependencies.
+* Fixed an issue where `DESCR` files are rendered incorrectly in some
+  cases.
 
 ## 0.1.1 -- 2025-01-11
 

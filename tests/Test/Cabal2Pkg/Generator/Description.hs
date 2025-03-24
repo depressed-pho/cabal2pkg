@@ -32,7 +32,26 @@ dummyMeta = PackageMeta
             }
 
 test =
-  testCase "Newlines in an unordered list item should be converted to spaces" $
+  testCase "Lines are filled correctly" $
+  genDESCR 76 (dummyMeta { description = source }) @?= rendered
+  where
+    source :: (IsString a, Monoid a) => a
+    source =
+      mconcat [ "Lorem ipsum dolor sit amet, consectetur adipiscing elit,\n"
+              , "sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.\n"
+              , "Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris\n"
+              , "@nisi@ @ut@ @aliquip@ @ex@ @ea@ @commodo@ @consequat@.\n"
+              ]
+    rendered :: (IsString a, Monoid a) => a
+    rendered =
+      mconcat [ "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod\n"
+              , "tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam,\n"
+              , "quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo\n"
+              , "consequat.\n"
+              ]
+
+test =
+  testCase "Newlines in an unordered list item are converted to spaces" $
   genDESCR 76 (dummyMeta { description = source }) @?= rendered
   where
     source :: (IsString a, Monoid a) => a
@@ -48,8 +67,8 @@ test =
     rendered =
       mconcat [ "* Lorem ipsum dolor sit amet, consectetur adipiscing elit,\n"
               , "* sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim\n"
-              , "  ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut\n"
-              , "  aliquip ex ea commodo consequat.\n"
+              , "  ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip\n"
+              , "  ex ea commodo consequat.\n"
               ]
 
 test =

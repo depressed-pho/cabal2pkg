@@ -83,6 +83,7 @@ library
         Cabal2Pkg.Extractor.Dependency.Library
         Cabal2Pkg.Extractor.Dependency.PkgConfig
         Cabal2Pkg.Extractor.Dependency.Version
+        Cabal2Pkg.Extractor.Haddock
         Cabal2Pkg.Extractor.License
         Cabal2Pkg.Generator.Buildlink3
         Cabal2Pkg.Generator.CommitMsg
