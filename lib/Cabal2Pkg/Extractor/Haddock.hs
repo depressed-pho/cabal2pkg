@@ -34,9 +34,10 @@ data DocTree ann =
   | Para   !(Doc ann)
   deriving Show
 
--- This is a HUGE mess. I don't like this code at all. But what else can we
--- do? The root cause of this messiness is that the Haddock AST isn't
--- convenient for us at all. Should we roll up our own Haddock parser?
+-- THINKME: This is a HUGE mess. I don't like this code at all. But what
+-- else can we do? The root cause of this messiness is that the Haddock AST
+-- isn't convenient for us at all. We should roll up our own Haddock
+-- parser and throw this abomination away.
 instance Semigroup (DocTree ann) where
   (Point a) <> (Point b) = Point (a <> b)
 
