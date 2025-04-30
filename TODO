@@ -78,7 +78,7 @@ options from command line (or really, a list of
 for cabal2pkg.
 
 * TODO [#C] Spawn a background process that maintains a local copy of Hackage database
-=cabal2pkg currently= performs an HTTP request to Hackage each time it
+=cabal2pkg= currently performs an HTTP request to Hackage each time it
 needs to query the database. This is not very efficient, especially when
 there a lot of packages to update.
 

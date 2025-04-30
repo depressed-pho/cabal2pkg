@@ -13,8 +13,7 @@ import Prettyprinter qualified as PP
 import Prettyprinter.Render.Text (renderLazy)
 
 genDESCR :: HasCallStack => Natural -> PackageMeta -> TL.Text
-genDESCR width = (<> "\n")
-                 . TL.strip
+genDESCR width = eof
                  . renderLazy
                  . PP.layoutPretty opts
                  . extractHaddock
@@ -24,3 +23,8 @@ genDESCR width = (<> "\n")
     opts = LayoutOptions
            { layoutPageWidth = AvailablePerLine (fromIntegral width) 1
            }
+
+    eof :: TL.Text -> TL.Text
+    eof txt
+      | TL.null txt = txt
+      | otherwise   = txt <> "\n"

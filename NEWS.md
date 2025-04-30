@@ -79,6 +79,11 @@ Bug fixes:
 * Fixed an issue where `DESCR` files are rendered incorrectly in some
   cases.
 
+Internal changes:
+
+* Dropped dependency on `haddock-library`. `cabal2pkg` now has its own
+  Haddock AST and a parser. There should be no behaviour changes.
+
 ## 0.1.1 -- 2025-01-11
 
 * Fixed an issue where dependencies that are unacceptably old are listed in

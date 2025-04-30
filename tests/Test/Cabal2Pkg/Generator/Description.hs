@@ -51,7 +51,68 @@ test =
               ]
 
 test =
-  testCase "Newlines in an unordered list item are converted to spaces" $
+  testCase "Examples" $
+  genDESCR 76 (dummyMeta { description = source }) @?= rendered
+  where
+    source :: (IsString a, Monoid a) => a
+    source =
+      mconcat [ ">>> fib 10\n"
+              , "55\n"
+              , "\n"
+              , ">>> putStrLn \"foo\\n\\nbar\"\n"
+              , "foo\n"
+              , "<BLANKLINE>\n"
+              , "bar\n"
+              ]
+    rendered :: (IsString a, Monoid a) => a
+    rendered =
+      mconcat [ ">>> fib 10\n"
+              , "55\n"
+              , "\n"
+              , ">>> putStrLn \"foo\\n\\nbar\"\n"
+              , "foo\n"
+              , "\n"
+              , "bar\n"
+              ]
+
+test =
+  testCase "Tables are currently not rendered but they can still be parsed" $
+  genDESCR 76 (dummyMeta { description = source }) @?= rendered
+  where
+    source :: (IsString a, Monoid a) => a
+    source =
+      mconcat [ "Table:\n"
+              , "\n"
+              , "+-----+-----+\n"
+              , "| abc | def |\n"
+              , "+=====+=====+\n"
+              , "| foo | bar |\n"
+              , "+-----+-----+\n"
+              , "| baz | qux |\n"
+              , "+-----+-----+\n"
+              ]
+    rendered :: (IsString a, Monoid a) => a
+    rendered =
+      mconcat [ "Table:\n"
+              ]
+
+test =
+  testCase "@since is not rendered" $
+  genDESCR 76 (dummyMeta { description = source }) @?= rendered
+  where
+    source :: (IsString a, Monoid a) => a
+    source =
+      mconcat [ "Foo\n"
+              , "\n"
+              , "@since 1.2.3\n"
+              ]
+    rendered :: (IsString a, Monoid a) => a
+    rendered =
+      mconcat [ "Foo\n"
+              ]
+
+test =
+  testCase "Basic unordered list" $
   genDESCR 76 (dummyMeta { description = source }) @?= rendered
   where
     source :: (IsString a, Monoid a) => a
@@ -72,7 +133,7 @@ test =
               ]
 
 test =
-  testCase "Ditto for ordered lists" $
+  testCase "Ordered lists" $
   genDESCR 76 (dummyMeta { description = source }) @?= rendered
   where
     source :: (IsString a, Monoid a) => a
@@ -93,7 +154,7 @@ test =
               ]
 
 test =
-  testCase "Ditto for definition lists" $
+  testCase "Definition lists" $
   genDESCR 76 (dummyMeta { description = source }) @?= rendered
   where
     source :: (IsString a, Monoid a) => a
@@ -113,4 +174,238 @@ test =
               , "    do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim\n"
               , "    ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut\n"
               , "    aliquip ex ea commodo consequat.\n"
+              ]
+
+test =
+  testCase "Nested lists" $
+  genDESCR 76 (dummyMeta { description = source }) @?= rendered
+  where
+    source :: (IsString a, Monoid a) => a
+    source =
+      mconcat [ "* Lorem ipsum dolor sit amet,\n"
+              , "\n"
+              , "    * Foo\n"
+              , "    * Bar\n"
+              , "\n"
+              , "    1. Baz\n"
+              , "    2. Qux\n"
+              ]
+    rendered :: (IsString a, Monoid a) => a
+    rendered =
+      mconcat [ "* Lorem ipsum dolor sit amet,\n"
+              , "\n"
+              , "  * Foo\n"
+              , "  * Bar\n"
+              , "\n"
+              , "  1. Baz\n"
+              , "  2. Qux\n"
+              ]
+
+test =
+  testCase "Code block (verbatim)" $
+  genDESCR 76 (dummyMeta { description = source }) @?= rendered
+  where
+    source :: (IsString a, Monoid a) => a
+    source =
+      mconcat [ "> @foo@\n"
+              , ">   /bar/ baz\n"
+              ]
+    rendered :: (IsString a, Monoid a) => a
+    rendered =
+      mconcat [ "@foo@\n"
+              , "  /bar/ baz\n"
+              ]
+
+test =
+  testCase "Code block (parsed)" $
+  genDESCR 76 (dummyMeta { description = source }) @?= rendered
+  where
+    source :: (IsString a, Monoid a) => a
+    source =
+      mconcat [ "@\n"
+              , "@foo@\n"
+              , "  /bar/ baz\n"
+              , "@\n"
+              ]
+    rendered :: (IsString a, Monoid a) => a
+    rendered =
+      mconcat [ "foo\n"
+              , "  bar baz\n"
+              ]
+
+test =
+  testCase "Properties" $
+  genDESCR 76 (dummyMeta { description = source }) @?= rendered
+  where
+    source :: (IsString a, Monoid a) => a
+    source =
+      mconcat [ "prop> a + b = b + a"
+              ]
+    rendered :: (IsString a, Monoid a) => a
+    rendered =
+      mconcat [ "prop> a + b = b + a\n"
+              ]
+
+test =
+  testCase "Heading" $
+  genDESCR 76 (dummyMeta { description = source }) @?= rendered
+  where
+    source :: (IsString a, Monoid a) => a
+    source =
+      mconcat [ "= Heading level 1 with some /emphasis/"
+              ]
+    rendered :: (IsString a, Monoid a) => a
+    rendered =
+      mconcat [ "# Heading level 1 with some emphasis\n"
+              ]
+
+test =
+  testCase "Monospaced" $
+  genDESCR 76 (dummyMeta { description = source }) @?= rendered
+  where
+    source :: (IsString a, Monoid a) => a
+    source =
+      mconcat [ "@foo bar@"
+              ]
+    rendered :: (IsString a, Monoid a) => a
+    rendered =
+      mconcat [ "foo bar\n"
+              ]
+
+test =
+  testCase "Emphasis" $
+  genDESCR 76 (dummyMeta { description = source }) @?= rendered
+  where
+    source :: (IsString a, Monoid a) => a
+    source =
+      mconcat [ "/foo bar/"
+              ]
+    rendered :: (IsString a, Monoid a) => a
+    rendered =
+      mconcat [ "foo bar\n"
+              ]
+
+test =
+  testCase "Bold" $
+  genDESCR 76 (dummyMeta { description = source }) @?= rendered
+  where
+    source :: (IsString a, Monoid a) => a
+    source =
+      mconcat [ "__foo bar__"
+              ]
+    rendered :: (IsString a, Monoid a) => a
+    rendered =
+      mconcat [ "foo bar\n"
+              ]
+
+test =
+  testCase "Anchor is invisible" $
+  genDESCR 76 (dummyMeta { description = source }) @?= rendered
+  where
+    source :: (IsString a, Monoid a) => a
+    source =
+      mconcat [ "foo#anchor#bar"
+              ]
+    rendered :: (IsString a, Monoid a) => a
+    rendered =
+      mconcat [ "foobar\n"
+              ]
+
+test =
+  testCase "Identifier" $
+  genDESCR 76 (dummyMeta { description = source }) @?= rendered
+  where
+    source :: (IsString a, Monoid a) => a
+    source =
+      mconcat [ "* An obvious 'identifier'\n"
+              , "* A mischievous 'identifier''\n"
+              , "* An operator '(<$>)'\n"
+              , "* A 'Qualified.identifier'\n"
+              , "* This isn't an identifier. No it's not.\n"
+              ]
+    rendered :: (IsString a, Monoid a) => a
+    rendered =
+      mconcat [ "* An obvious identifier\n"
+              , "* A mischievous identifier'\n"
+              , "* An operator (<$>)\n"
+              , "* A Qualified.identifier\n"
+              , "* This isn't an identifier. No it's not.\n"
+              ]
+
+test =
+  testCase "Hyperlinks" $
+  genDESCR 76 (dummyMeta { description = source }) @?= rendered
+  where
+    source :: (IsString a, Monoid a) => a
+    source =
+      mconcat [ "* <http://explicit-link.example.org/>\n"
+              , "* <http://explicit-link.example.org/ label>\n"
+              , "* http://implicit-link.example.org/\n"
+              ]
+    rendered :: (IsString a, Monoid a) => a
+    rendered =
+      mconcat [ "* http://explicit-link.example.org/\n"
+              , "* label (http://explicit-link.example.org/)\n"
+              , "* http://implicit-link.example.org/\n"
+              ]
+
+test =
+  testCase "Module links" $
+  genDESCR 76 (dummyMeta { description = source }) @?= rendered
+  where
+    source :: (IsString a, Monoid a) => a
+    source =
+      mconcat [ "* \"Foo\"\n"
+              , "* \"Foo.Bar\"\n"
+              , "* [markdown style](\"Foo.Bar.Baz\")\n"
+              ]
+    rendered :: (IsString a, Monoid a) => a
+    rendered =
+      mconcat [ "* Foo\n"
+              , "* Foo.Bar\n"
+              , "* markdown style\n"
+              ]
+
+test =
+  testCase "Pictures" $
+  genDESCR 76 (dummyMeta { description = source }) @?= rendered
+  where
+    source :: (IsString a, Monoid a) => a
+    source =
+      mconcat [ "* inline <<picture.png>>\n"
+              , "* inline <<picture.png label>>\n"
+              ]
+    rendered :: (IsString a, Monoid a) => a
+    rendered =
+      -- This isn't ideal as there shouldn't be a trailing whitespace. But
+      -- we can't make an effort just for rare cases where package
+      -- descriptions have images.
+      mconcat [ "* inline \n"
+              , "* inline \n"
+              ]
+
+test =
+  testCase "Block Math" $
+  genDESCR 76 (dummyMeta { description = source }) @?= rendered
+  where
+    source :: (IsString a, Monoid a) => a
+    source =
+      mconcat [ "\\[f(a) = \\frac{1}{a}\\]"
+              ]
+    rendered :: (IsString a, Monoid a) => a
+    rendered =
+      mconcat [ "f(a) = \\frac{1}{a}\n"
+              ]
+
+test =
+  testCase "Inline Math" $
+  genDESCR 76 (dummyMeta { description = source }) @?= rendered
+  where
+    source :: (IsString a, Monoid a) => a
+    source =
+      mconcat [ "\\(f(a) = \\frac{1}{a}\\)"
+              ]
+    rendered :: (IsString a, Monoid a) => a
+    rendered =
+      mconcat [ "f(a) = \\frac{1}{a}\n"
               ]
