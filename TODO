@@ -5,6 +5,9 @@
 * DONE [#A] =HASKELL_UNRESTRICT_DEPENDENCIES= should only be generated to allow newer deps but not older ones
 * DONE [#B] Allow wip packages to update
 * DONE [#C] Can we somehow filter out duplicate dependencies listed in the same component? (pandoc-lua-marshal-0.3.0)
+* TODO [#A] NOTE: Makefile:99: "empty(MACHINE_ARCH:M*arm*)" can be simplified to "!${MACHINE_ARCH:M*arm*}".
+Try running pkglint on sysutils/git-annex.
+
 * TODO [#C] =cabal2pkg update=: Fall back to an older version if the latest one depends on a newer GHC
 This feature is really nice to have, but it doesn't work out in the general
 case. Consider the following scenario:
