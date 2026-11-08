@@ -1,6 +1,6 @@
 # Revision history for cabal2pkg
 
-## 0.1.2 -- not released yet
+## 0.1.2 -- 2026-11-08
 
 Compatibility changes:
 
@@ -28,7 +28,7 @@ Behaviour changes:
   variable is now completely overwritten rather than being patched during
   updates. This is because its value is not determined solely by the
   package itself but also by the surrounding environment (i.e. the versions
-  of packages it dependson, including the ones that come along with GHC),
+  of packages it depends on, including the ones that come along with GHC),
   and the environment might have changed since when the last time the
   package was updated. Attempting to merge changes to them thus tended to
   create merge conflicts that didn't really make sense.
